@@ -1,6 +1,7 @@
 package com.omnichannel.support.api;
 
 import com.omnichannel.support.dto.ApiResponse;
+import com.omnichannel.support.dto.CreateAuthenticatedTicketRequest;
 import com.omnichannel.support.dto.CreateTicketRequest;
 import com.omnichannel.support.dto.MergeTicketsRequest;
 import com.omnichannel.support.dto.MessageDto;
@@ -50,7 +51,7 @@ public class TicketController {
 
     @PostMapping(path = "/me", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiResponse<TicketDto>> createMyTicket(
-            @Valid @RequestBody CreateTicketRequest request, Authentication authentication) {
+            @Valid @RequestBody CreateAuthenticatedTicketRequest request, Authentication authentication) {
         AppUser user = authenticatedUserService.requireCurrentUser(authentication);
         CreateTicketRequest trustedRequest = new CreateTicketRequest(
                 user.customerId(),
