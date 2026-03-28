@@ -18,7 +18,7 @@ repositories {
 }
 
 dependencies {
-    val flywayVersion = "10.10.0"
+    val flywayVersion = "11.20.3"
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-validation")
