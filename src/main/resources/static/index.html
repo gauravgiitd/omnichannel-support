@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omnichannel Support Prototype</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body data-view="landing">
+<div class="page-shell">
+    <header class="hero">
+        <div>
+            <p class="eyebrow">Eliminating Email as a System of Record</p>
+            <h1>Open the support system from the customer side or the agent side.</h1>
+            <p class="hero-copy">
+                This prototype now exposes two dedicated URLs. Customers can start on email, continue on WhatsApp,
+                and see the full thread in the app. Agents see the same ticket as one routed conversation with one
+                shared document layer.
+            </p>
+        </div>
+        <div class="hero-actions">
+            <a class="route-link primary" href="/customer">Open Customer UI</a>
+            <a class="route-link" href="/agent">Open Agent UI</a>
+        </div>
+    </header>
+
+    <section class="surface landing-surface">
+        <div class="route-grid">
+            <article class="route-card">
+                <p class="eyebrow">Endpoint</p>
+                <h2><a href="/customer">/customer</a></h2>
+                <p>Customer channels, in-app inbox, and the cross-channel conversation view.</p>
+            </article>
+            <article class="route-card">
+                <p class="eyebrow">Endpoint</p>
+                <h2><a href="/agent">/agent</a></h2>
+                <p>Queue board, ticket chat, routing controls, and agent reply tools.</p>
+            </article>
+        </div>
+    </section>
+</div>
+</body>
+</html>

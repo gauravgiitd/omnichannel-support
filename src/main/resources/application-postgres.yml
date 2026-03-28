@@ -1,0 +1,6 @@
+spring:
+  datasource:
+    url: ${JDBC_DATABASE_URL:jdbc:postgresql://${DATABASE_HOST:localhost}:${DATABASE_PORT:5432}/${DATABASE_NAME:omnichannel_support}}
+    username: ${DATABASE_USER:support}
+    password: ${DATABASE_PASSWORD:support}
+    driver-class-name: org.postgresql.Driver

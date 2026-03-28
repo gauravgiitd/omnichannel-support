@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: omnichannel-support
+    runtime: docker
+    plan: starter
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: postgres
+      - key: DATABASE_HOST
+        fromDatabase:
+          name: omnichannel-support-db
+          property: host
+      - key: DATABASE_PORT
+        value: "5432"
+      - key: DATABASE_NAME
+        fromDatabase:
+          name: omnichannel-support-db
+          property: database
+      - key: DATABASE_USER
+        fromDatabase:
+          name: omnichannel-support-db
+          property: user
+      - key: DATABASE_PASSWORD
+        fromDatabase:
+          name: omnichannel-support-db
+          property: password
+
+databases:
+  - name: omnichannel-support-db
+    plan: basic-256mb
+    region: singapore
+    databaseName: omnichannel_support
+    user: support
+    postgresMajorVersion: "17"

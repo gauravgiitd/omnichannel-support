@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: omnichannel-support-platform
+  jackson:
+    default-property-inclusion: non_null
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  datasource:
+    url: jdbc:h2:mem:support;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+support:
+  outbound-email:
+    from-address: support@company.example
+    from-display-name: Company Support
+  system-identity:
+    agent-reply-from-address: support@company.example
