@@ -12,4 +12,7 @@ public interface CustomerIdentityLinkRepository extends JpaRepository<CustomerId
             IdentifierType identifierType, String identifierValue);
 
     List<CustomerIdentityLink> findByCustomerId(String customerId);
+
+    Optional<CustomerIdentityLink> findFirstByCustomerIdAndIdentifierTypeOrderByCreatedAtAsc(
+            String customerId, IdentifierType identifierType);
 }

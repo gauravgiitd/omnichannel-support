@@ -46,6 +46,7 @@ public class TicketService {
     private final AuditService auditService;
     private final DocumentService documentService;
     private final RoutingService routingService;
+    private final TicketEmailNotificationService ticketEmailNotificationService;
 
     @Transactional
     public TicketDto createTicket(CreateTicketRequest request) {
@@ -92,11 +93,13 @@ public class TicketService {
                 ticket.getTicketNumber(),
                 "SYSTEM",
                 "ticket-service",
-                java.util.Map.of(
-                        "channel",
-                        request.sourceChannel().name(),
-                        "assigned_queue",
-                        ticket.getAssignedQueue() != null ? ticket.getAssignedQueue() : ""));
+                        java.util.Map.of(
+                                "channel",
+                                request.sourceChannel().name(),
+                                "assigned_queue",
+                                ticket.getAssignedQueue() != null ? ticket.getAssignedQueue() : ""));
+
+        ticketEmailNotificationService.sendTicketCreatedEmail(ticket);
 
         return toDto(ticket);
     }
