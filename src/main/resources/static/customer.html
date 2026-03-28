@@ -12,8 +12,8 @@
         <div>
             <p class="eyebrow">Customer Experience</p>
             <p class="hero-copy">
-                The customer UI shows a single support thread regardless of where the issue started. WhatsApp and
-                app messages stay in the product, while email replies continue directly from the customer inbox.
+                The customer UI shows a single support thread regardless of where the issue started. In-app messages
+                stay in the product, while email replies continue directly from the customer inbox.
             </p>
         </div>
         <div class="hero-actions">
@@ -49,34 +49,10 @@
 
                 <div id="startSupportBody">
                     <div class="tab-row">
-                        <button class="tab-button active" data-tab="whatsapp">WhatsApp</button>
-                        <button class="tab-button" data-tab="app-message">In-App Message</button>
+                        <button class="tab-button active" data-tab="app-message">In-App Message</button>
                     </div>
 
-                    <div class="tab-panel active" data-panel="whatsapp">
-                        <form id="whatsappForm" class="stack-form">
-                            <div class="grid two">
-                                <label>
-                                    WhatsApp phone
-                                    <input name="fromE164Phone" type="text" value="+919900001234" required>
-                                </label>
-                            </div>
-                            <label>
-                                WhatsApp message
-                                <textarea name="bodyText" rows="4" required>I am opening a new issue on WhatsApp.</textarea>
-                            </label>
-                            <label>
-                                Attach documents
-                                <input name="attachments" type="file" multiple>
-                            </label>
-                            <div class="form-footer">
-                                <p>Use this section only when you want to open a new support ticket.</p>
-                                <button type="submit">Open ticket from WhatsApp</button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <div class="tab-panel" data-panel="app-message">
+                    <div class="tab-panel active" data-panel="app-message">
                         <form id="appForm" class="stack-form">
                         <label>
                             In-app message

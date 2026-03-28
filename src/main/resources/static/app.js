@@ -57,25 +57,6 @@ function bindControls() {
 }
 
 function bindForms() {
-    bindSubmit("whatsappForm", async (event) => {
-        const data = new FormData(event.currentTarget);
-        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
-
-        const response = await api("/v1/inbound/whatsapp", {
-            method: "POST",
-            body: {
-                wa_message_id: `wa-${Date.now()}`,
-                from_e164_phone: data.get("fromE164Phone"),
-                body_text: data.get("bodyText"),
-                force_new_ticket: true,
-                attachment_urls: uploadedFiles.map(encodeDriveAttachmentToken)
-            }
-        });
-
-        pushEvent("Customer continued on WhatsApp", `WhatsApp stayed on ${response.data.ticket_number}.`);
-        await refreshBoard(response.data.ticket_number);
-    });
-
     bindSubmit("appForm", async (event) => {
         const data = new FormData(event.currentTarget);
         const response = await api("/v1/tickets/me", {
@@ -257,7 +238,6 @@ function renderMetrics() {
     const metrics = [
         { label: "Total tickets", value: state.tickets.length, copy: "All omnichannel issues" },
         { label: "Open tickets", value: state.tickets.filter((ticket) => !["RESOLVED", "CLOSED"].includes(ticket.status)).length, copy: "Still active with support" },
-        { label: "Triage queue", value: state.tickets.filter((ticket) => (ticket.assigned_queue || "").toLowerCase().includes("triage")).length, copy: "Needs more context" },
         { label: "Customers", value: new Set(state.tickets.map((ticket) => ticket.customer_id)).size, copy: "Customers represented" }
     ];
 
@@ -299,14 +279,11 @@ function renderQueueBoard() {
     }
 
     const groups = [
-        { title: "Triage", className: "triage", matcher: (queue) => !queue || queue.toLowerCase().includes("triage") },
-        { title: "Claims", className: "claims", matcher: (queue) => queue && queue.toLowerCase().includes("claim") },
-        { title: "Policy", className: "policy", matcher: (queue) => queue && queue.toLowerCase().includes("policy") },
-        { title: "Billing and other", className: "billing", matcher: (queue) => queue && !queue.toLowerCase().includes("triage") && !queue.toLowerCase().includes("claim") && !queue.toLowerCase().includes("policy") }
+        { title: "Open tickets", className: "triage", matcher: (_queue, ticket) => !["RESOLVED", "CLOSED"].includes(ticket.status) }
     ];
 
     queueBoard.innerHTML = groups.map((group) => {
-        const tickets = state.tickets.filter((ticket) => group.matcher(ticket.assigned_queue));
+        const tickets = state.tickets.filter((ticket) => group.matcher(ticket.assigned_queue, ticket));
         return `
             <section class="queue-column ${group.className}">
                 <h4>${group.title}</h4>
@@ -382,7 +359,7 @@ function renderCustomerExperience() {
     }
 
     customerHeading.textContent = `${state.currentTicket.ticket_id} selected`;
-    text("customerAppSubhead", "The expanded ticket shows the same support conversation, including ticket emails, WhatsApp updates, and agent replies.");
+    text("customerAppSubhead", "The expanded ticket shows the same support conversation, including ticket emails and agent replies.");
     text("customerStatusPill", state.currentTicket.status);
     setStartSupportCollapsed(true);
 }
@@ -402,7 +379,7 @@ function renderCustomerTicketList() {
     container.className = "queue-stack";
     container.innerHTML = tickets.map(renderCustomerTicketAccordion).join("");
     container.querySelectorAll(".customer-ticket-header").forEach((card) => {
-        card.addEventListener("click", () => selectTicket(card.dataset.ticketId).catch(handleError));
+        card.addEventListener("click", () => toggleCustomerTicket(card.dataset.ticketId).catch(handleError));
     });
     hydrateExpandedCustomerTicket(container);
 }
@@ -464,7 +441,6 @@ function renderCustomerTicketAccordion(ticket) {
                                 Continue via
                                 <select name="channel">
                                     <option value="UI">APP</option>
-                                    <option value="WHATSAPP">WHATSAPP</option>
                                 </select>
                             </label>
                             <label>
@@ -572,6 +548,7 @@ function clearWorkspace() {
     state.currentTicket = null;
     state.messages = [];
     state.documents = [];
+    persistTicketId(null);
     renderCustomerExperience();
     renderCustomerTicketList();
     setStartSupportCollapsed(false);
@@ -692,18 +669,7 @@ async function submitCustomerComposeForm(event) {
     const body = data.get("body");
     const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
 
-    if (channel === "WHATSAPP") {
-        await api("/v1/inbound/whatsapp", {
-            method: "POST",
-            body: {
-                wa_message_id: `wa-${Date.now()}`,
-                from_e164_phone: senderIdentifier,
-                body_text: body,
-                ticket_number_hint: state.selectedTicketId,
-                attachment_urls: uploadedFiles.map(encodeDriveAttachmentToken)
-            }
-        });
-    } else if (uploadedFiles.length) {
+    if (uploadedFiles.length) {
         for (let index = 0; index < uploadedFiles.length; index += 1) {
             const file = uploadedFiles[index];
             await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
@@ -781,8 +747,20 @@ async function loadSession() {
 
 function persistTicketId(ticketId) {
     state.selectedTicketId = ticketId;
-    localStorage.setItem(STORAGE_KEYS.ticketId, ticketId);
+    if (ticketId) {
+        localStorage.setItem(STORAGE_KEYS.ticketId, ticketId);
+    } else {
+        localStorage.removeItem(STORAGE_KEYS.ticketId);
+    }
     syncTicketUrl(ticketId);
+}
+
+async function toggleCustomerTicket(ticketId) {
+    if (state.view === "customer" && state.selectedTicketId === ticketId) {
+        clearWorkspace();
+        return;
+    }
+    await selectTicket(ticketId);
 }
 
 function syncUserIdentity() {
