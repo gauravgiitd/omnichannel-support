@@ -55,6 +55,12 @@ support:
     client-id: ${GMAIL_POLLING_CLIENT_ID:}
     client-secret: ${GMAIL_POLLING_CLIENT_SECRET:}
     refresh-token: ${GMAIL_POLLING_REFRESH_TOKEN:}
+  drive-storage:
+    enabled: ${DRIVE_STORAGE_ENABLED:false}
+    folder-id: ${DRIVE_STORAGE_FOLDER_ID:}
+    client-id: ${DRIVE_STORAGE_CLIENT_ID:}
+    client-secret: ${DRIVE_STORAGE_CLIENT_SECRET:}
+    refresh-token: ${DRIVE_STORAGE_REFRESH_TOKEN:}
   outbound-email:
     from-address: support@company.example
     from-display-name: Company Support

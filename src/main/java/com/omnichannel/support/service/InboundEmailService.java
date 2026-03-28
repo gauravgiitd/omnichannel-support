@@ -59,8 +59,9 @@ public class InboundEmailService {
         if (threaded.isPresent()) {
             Ticket canonical = ticketResolutionService.resolveCanonical(threaded.get());
             assertCustomerOwns(customerId, canonical);
-            List<String> docIds = registerEmailAttachments(canonical, customerId, request);
-            List<String> fileUrls = attachmentFileUrls(request);
+            List<DocumentDto> documents = registerEmailAttachments(canonical, customerId, request);
+            List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
+            List<String> fileUrls = documents.stream().map(DocumentDto::fileUrl).toList();
             Map<String, Object> metadata = buildEmailMetadata(request);
             if (!docIds.isEmpty()) {
                 metadata.put("attachment_ids", docIds);
@@ -105,8 +106,9 @@ public class InboundEmailService {
                         .map(ticketResolutionService::resolveCanonical)
                         .orElseThrow(() -> new ValidationException("ticket not found after create"));
 
-        List<String> docIds = registerEmailAttachments(ticket, customerId, request);
-        List<String> fileUrls = attachmentFileUrls(request);
+        List<DocumentDto> documents = registerEmailAttachments(ticket, customerId, request);
+        List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
+        List<String> fileUrls = documents.stream().map(DocumentDto::fileUrl).toList();
         conversationService.enrichLatestMessageWithInboundFiles(ticket, fileUrls, docIds);
 
         auditService.record(
@@ -130,14 +132,14 @@ public class InboundEmailService {
         }
     }
 
-    private List<String> registerEmailAttachments(
+    private List<DocumentDto> registerEmailAttachments(
             Ticket canonical, String customerId, InboundEmailRequest request) {
         if (request.attachments() == null || request.attachments().isEmpty()) {
             return List.of();
         }
         String claimHint = blankToNull(request.claimIdHint());
         String policyHint = blankToNull(request.policyIdHint());
-        List<String> ids = new ArrayList<>();
+        List<DocumentDto> documents = new ArrayList<>();
         for (InboundEmailAttachment a : request.attachments()) {
             Map<String, Object> meta = new HashMap<>();
             if (a.fileName() != null) {
@@ -146,6 +148,7 @@ public class InboundEmailService {
             if (a.mimeType() != null) {
                 meta.put("mime_type", a.mimeType());
             }
+            addDriveMetadata(meta, a.fileUrl());
             meta.put("source", "email_inbound");
             String docType =
                     a.documentType() != null && !a.documentType().isBlank()
@@ -161,23 +164,9 @@ public class InboundEmailService {
                             claimHint,
                             policyHint,
                             meta);
-            ids.add(d.documentId());
+            documents.add(d);
         }
-        return ids;
-    }
-
-    private static String blankToNull(String s) {
-        if (s == null || s.isBlank()) {
-            return null;
-        }
-        return s.trim();
-    }
-
-    private static List<String> attachmentFileUrls(InboundEmailRequest request) {
-        if (request.attachments() == null || request.attachments().isEmpty()) {
-            return List.of();
-        }
-        return request.attachments().stream().map(InboundEmailAttachment::fileUrl).toList();
+        return documents;
     }
 
     private static void assertCustomerOwns(String customerId, Ticket ticket) {
@@ -258,6 +247,57 @@ public class InboundEmailService {
             return trimmed.substring(1, trimmed.length() - 1);
         }
         return trimmed;
+    }
+
+    private static void addDriveMetadata(Map<String, Object> metadata, String fileUrl) {
+        DriveFileToken token = DriveFileToken.parse(fileUrl);
+        if (token != null) {
+            metadata.put("drive_file_id", token.fileId());
+            if (token.fileName() != null && !token.fileName().isBlank()) {
+                metadata.put("file_name", token.fileName());
+            }
+            if (token.mimeType() != null && !token.mimeType().isBlank()) {
+                metadata.put("mime_type", token.mimeType());
+            }
+        }
+    }
+
+    private static String blankToNull(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        return s.trim();
+    }
+
+    private record DriveFileToken(String fileId, String fileName, String mimeType) {
+        static DriveFileToken parse(String raw) {
+            if (raw == null || !raw.startsWith("drive://")) {
+                return null;
+            }
+            String remainder = raw.substring("drive://".length());
+            String fileId = remainder;
+            String fileName = null;
+            String mimeType = null;
+            int queryIndex = remainder.indexOf('?');
+            if (queryIndex >= 0) {
+                fileId = remainder.substring(0, queryIndex);
+                String query = remainder.substring(queryIndex + 1);
+                for (String part : query.split("&")) {
+                    int eq = part.indexOf('=');
+                    if (eq < 0) {
+                        continue;
+                    }
+                    String key = java.net.URLDecoder.decode(part.substring(0, eq), java.nio.charset.StandardCharsets.UTF_8);
+                    String value = java.net.URLDecoder.decode(part.substring(eq + 1), java.nio.charset.StandardCharsets.UTF_8);
+                    if ("name".equals(key)) {
+                        fileName = value;
+                    } else if ("mime".equals(key)) {
+                        mimeType = value;
+                    }
+                }
+            }
+            return new DriveFileToken(fileId, fileName, mimeType);
+        }
     }
 
     public enum InboundOutcome {

@@ -43,13 +43,14 @@ public class DocumentService {
             String policyId,
             Map<String, Object> metadata) {
         TicketDocument doc = new TicketDocument();
-        doc.setPublicId(UUID.randomUUID().toString());
+        String publicId = UUID.randomUUID().toString();
+        doc.setPublicId(publicId);
         doc.setTicket(ticket);
         doc.setCustomerId(customerId);
         doc.setClaimId(blankToNull(claimId));
         doc.setPolicyId(blankToNull(policyId));
         doc.setDocumentType(documentType != null && !documentType.isBlank() ? documentType : "other");
-        doc.setFileUrl(fileUrl);
+        doc.setFileUrl(resolveStoredFileUrl(publicId, fileUrl, metadata));
         doc.setSourceChannel(sourceChannel);
         doc.setMetadataJson(toJson(metadata));
         TicketDocument saved = ticketDocumentRepository.save(doc);
@@ -67,11 +68,24 @@ public class DocumentService {
         return toDto(saved);
     }
 
+    @Transactional(readOnly = true)
+    public TicketDocument getByPublicId(String publicId) {
+        return ticketDocumentRepository.findByPublicId(publicId)
+                .orElseThrow(() -> new com.omnichannel.support.error.NotFoundException("document not found"));
+    }
+
     private static String blankToNull(String s) {
         if (s == null || s.isBlank()) {
             return null;
         }
         return s.trim();
+    }
+
+    private static String resolveStoredFileUrl(String publicId, String fileUrl, Map<String, Object> metadata) {
+        if (metadata != null && metadata.get("drive_file_id") != null) {
+            return "/v1/documents/" + publicId + "/content";
+        }
+        return fileUrl;
     }
 
     private DocumentDto toDto(TicketDocument doc) {

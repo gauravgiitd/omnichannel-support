@@ -27,6 +27,7 @@ public class GmailInboundPollingService {
     private final GmailPollingProperties properties;
     private final SupportPlatformProperties supportPlatformProperties;
     private final GmailApiClient gmailApiClient;
+    private final GoogleDriveStorageService googleDriveStorageService;
     private final InboundEmailService inboundEmailService;
 
     @Scheduled(fixedDelayString = "${support.gmail-polling.fixed-delay-ms:30000}")
@@ -52,6 +53,7 @@ public class GmailInboundPollingService {
                 gmailApiClient.markProcessed(gmailMessageId);
                 return;
             }
+            List<InboundEmailAttachment> attachments = uploadAttachmentsToDrive(gmailMessageId, envelope.attachments());
 
             inboundEmailService.ingest(new InboundEmailRequest(
                     envelope.fromAddress(),
@@ -66,12 +68,34 @@ public class GmailInboundPollingService {
                     null,
                     null,
                     false,
-                    envelope.attachments()));
+                    attachments));
 
             gmailApiClient.markProcessed(gmailMessageId);
         } catch (Exception ex) {
             log.error("Failed processing Gmail message {}", gmailMessageId, ex);
         }
+    }
+
+    private List<InboundEmailAttachment> uploadAttachmentsToDrive(
+            String gmailMessageId, List<PendingAttachment> attachments) throws Exception {
+        if (attachments == null || attachments.isEmpty()) {
+            return List.of();
+        }
+        List<InboundEmailAttachment> uploaded = new ArrayList<>();
+        for (PendingAttachment attachment : attachments) {
+            byte[] bytes = gmailApiClient.getAttachment(gmailMessageId, attachment.attachmentId());
+            GoogleDriveStorageService.StoredDriveFile stored = googleDriveStorageService.upload(
+                    attachment.fileName(),
+                    attachment.mimeType(),
+                    bytes,
+                    "Inbound Gmail attachment");
+            uploaded.add(new InboundEmailAttachment(
+                    "drive://" + stored.fileId(),
+                    stored.fileName(),
+                    stored.mimeType(),
+                    attachment.documentType()));
+        }
+        return uploaded;
     }
 
     private String effectiveQuery() {
@@ -90,7 +114,7 @@ public class GmailInboundPollingService {
             String messageId,
             String inReplyTo,
             List<String> references,
-            List<InboundEmailAttachment> attachments) {
+            List<PendingAttachment> attachments) {
 
         static EmailEnvelope from(JsonNode message, String supportAddress) {
             JsonNode payload = message.path("payload");
@@ -108,7 +132,7 @@ public class GmailInboundPollingService {
             String inReplyTo = header(payload, "In-Reply-To");
             List<String> references = parseReferences(header(payload, "References"));
 
-            BodyAndAttachments parsed = readPayload(payload, message.path("id").asText(""));
+            BodyAndAttachments parsed = readPayload(payload);
             String body = parsed.bodyText() != null && !parsed.bodyText().isBlank()
                     ? parsed.bodyText()
                     : (message.path("snippet").asText(""));
@@ -154,11 +178,11 @@ public class GmailInboundPollingService {
             return raw.trim().toLowerCase(Locale.ROOT);
         }
 
-        private static BodyAndAttachments readPayload(JsonNode payload, String gmailMessageId) {
-            List<InboundEmailAttachment> attachments = new ArrayList<>();
+        private static BodyAndAttachments readPayload(JsonNode payload) {
+            List<PendingAttachment> attachments = new ArrayList<>();
             String plain = extractBody(payload, "text/plain");
             String html = extractBody(payload, "text/html");
-            collectAttachments(payload, gmailMessageId, attachments);
+            collectAttachments(payload, attachments);
             String body = plain != null && !plain.isBlank() ? plain : stripHtml(html);
             return new BodyAndAttachments(body, attachments);
         }
@@ -180,19 +204,15 @@ public class GmailInboundPollingService {
             return null;
         }
 
-        private static void collectAttachments(JsonNode part, String gmailMessageId, List<InboundEmailAttachment> out) {
+        private static void collectAttachments(JsonNode part, List<PendingAttachment> out) {
             String filename = part.path("filename").asText("");
             String attachmentId = part.path("body").path("attachmentId").asText("");
             if (!filename.isBlank() && !attachmentId.isBlank()) {
                 String mimeType = part.path("mimeType").asText("");
-                out.add(new InboundEmailAttachment(
-                        "/v1/gmail/messages/" + gmailMessageId + "/attachments/" + attachmentId + "/" + sanitize(filename),
-                        filename,
-                        mimeType,
-                        guessDocumentType(filename, mimeType)));
+                out.add(new PendingAttachment(attachmentId, filename, mimeType, guessDocumentType(filename, mimeType)));
             }
             for (JsonNode child : part.path("parts")) {
-                collectAttachments(child, gmailMessageId, out);
+                collectAttachments(child, out);
             }
         }
 
@@ -207,10 +227,6 @@ public class GmailInboundPollingService {
             return HTML_TAG.matcher(html).replaceAll(" ").replace("&nbsp;", " ").trim();
         }
 
-        private static String sanitize(String value) {
-            return value.replaceAll("[^A-Za-z0-9._-]", "_");
-        }
-
         private static String guessDocumentType(String filename, String mimeType) {
             String lower = (filename == null ? "" : filename.toLowerCase(Locale.ROOT));
             if (lower.endsWith(".pdf") || "application/pdf".equalsIgnoreCase(mimeType)) {
@@ -223,5 +239,7 @@ public class GmailInboundPollingService {
         }
     }
 
-    private record BodyAndAttachments(String bodyText, List<InboundEmailAttachment> attachments) {}
+    private record BodyAndAttachments(String bodyText, List<PendingAttachment> attachments) {}
+
+    private record PendingAttachment(String attachmentId, String fileName, String mimeType, String documentType) {}
 }

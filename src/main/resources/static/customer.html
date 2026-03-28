@@ -71,8 +71,8 @@
                                 <textarea name="bodyText" rows="4" required>I need help with my motor policy endorsement. I am starting this issue over email.</textarea>
                             </label>
                             <label>
-                                Attachment URLs
-                                <input name="attachments" type="text" value="https://files.example/policy-copy.pdf">
+                                Attach documents
+                                <input name="attachments" type="file" multiple>
                             </label>
                             <div class="form-footer">
                                 <p>The customer begins on `support@acko.com`, but the system keeps the ticket, not the inbox, as the source of truth.</p>
@@ -94,8 +94,8 @@
                                 <textarea name="bodyText" rows="4" required>I am opening a new issue on WhatsApp.</textarea>
                             </label>
                             <label>
-                                Attachment URLs
-                                <input name="attachmentUrls" type="text" value="https://files.example/vehicle-rc.pdf">
+                                Attach documents
+                                <input name="attachments" type="file" multiple>
                             </label>
                             <div class="form-footer">
                                 <p>Use this section only when you want to open a new support ticket.</p>
@@ -110,6 +110,10 @@
                             In-app message
                             <textarea name="initialMessageBody" rows="4" required>I need to open a new support ticket from the app.</textarea>
                         </label>
+                            <label>
+                                Attach documents
+                                <input name="attachments" type="file" multiple>
+                            </label>
                             <div class="form-footer">
                                 <p>Use this section only when a brand-new ticket needs to be created.</p>
                                 <button type="submit">Open new ticket in app</button>
@@ -162,12 +166,10 @@
                                 Message
                                 <textarea name="body" rows="4" required>I want to continue on this same support ticket.</textarea>
                             </label>
-                            <div class="grid two">
-                                <label>
-                                    Optional file URL
-                                    <input name="fileUrl" type="url" value="https://files.example/additional-proof.pdf">
-                                </label>
-                            </div>
+                            <label>
+                                Attach documents
+                                <input name="attachments" type="file" multiple>
+                            </label>
                             <button type="submit">Send update to this ticket</button>
                         </form>
                     </div>

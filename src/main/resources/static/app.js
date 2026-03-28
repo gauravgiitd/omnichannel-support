@@ -56,6 +56,7 @@ function bindControls() {
 function bindForms() {
     bindSubmit("emailForm", async (event) => {
         const data = new FormData(event.currentTarget);
+        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
 
         const response = await api("/v1/inbound/email", {
             method: "POST",
@@ -66,10 +67,10 @@ function bindForms() {
                 body_text: data.get("bodyText"),
                 message_id: `email-${Date.now()}`,
                 force_new_ticket: true,
-                attachments: parseCsv(data.get("attachments")).map((url, index) => ({
-                    file_url: url,
-                    file_name: `email-attachment-${index + 1}`,
-                    mime_type: guessMimeType(url),
+                attachments: uploadedFiles.map((file) => ({
+                    file_url: file.file_token,
+                    file_name: file.file_name,
+                    mime_type: file.mime_type,
                     document_type: "email_attachment"
                 }))
             }
@@ -81,6 +82,7 @@ function bindForms() {
 
     bindSubmit("whatsappForm", async (event) => {
         const data = new FormData(event.currentTarget);
+        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
 
         const response = await api("/v1/inbound/whatsapp", {
             method: "POST",
@@ -89,7 +91,7 @@ function bindForms() {
                 from_e164_phone: data.get("fromE164Phone"),
                 body_text: data.get("bodyText"),
                 force_new_ticket: true,
-                attachment_urls: parseCsv(data.get("attachmentUrls"))
+                attachment_urls: uploadedFiles.map(encodeDriveAttachmentToken)
             }
         });
 
@@ -114,6 +116,27 @@ function bindForms() {
                 initial_external_thread_ref: `ui-${Date.now()}`
             }
         });
+
+        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
+        for (const file of uploadedFiles) {
+            await api(`/v1/tickets/${response.data.ticket_id}/documents`, {
+                method: "POST",
+                body: {
+                    channel: "UI",
+                    sender_type: "CUSTOMER",
+                    sender_identifier: state.user.email,
+                    file_url: file.file_token,
+                    document_type: "customer_upload",
+                    message_body: "Customer uploaded a document while opening the ticket.",
+                    metadata: {
+                        source: "customer_app_upload",
+                        drive_file_id: driveFileIdFromToken(file.file_token),
+                        file_name: file.file_name,
+                        mime_type: file.mime_type
+                    }
+                }
+            });
+        }
 
         pushEvent("Customer created a new in-app ticket", `${response.data.ticket_id} was created from the app.`);
         await refreshBoard(response.data.ticket_id);
@@ -185,8 +208,8 @@ function bindForms() {
         const data = new FormData(event.currentTarget);
         const channel = data.get("channel");
         const senderIdentifier = data.get("senderIdentifier");
-        const fileUrl = blankOrNull(data.get("fileUrl"));
         const body = data.get("body");
+        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
 
         if (channel === "WHATSAPP") {
             await api("/v1/inbound/whatsapp", {
@@ -196,34 +219,44 @@ function bindForms() {
                     from_e164_phone: senderIdentifier,
                     body_text: body,
                     ticket_number_hint: state.selectedTicketId,
-                    attachment_urls: fileUrl ? [fileUrl] : []
+                    attachment_urls: uploadedFiles.map(encodeDriveAttachmentToken)
                 }
-            });
-        } else if (fileUrl) {
-            await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
-                method: "POST",
-                body: pruneEmpty({
-                    channel,
-                    sender_type: "CUSTOMER",
-                    sender_identifier: senderIdentifier,
-                    file_url: fileUrl,
-                    document_type: "supporting_document",
-                    message_body: body,
-                    metadata: { source: "customer_conversation" }
-                })
             });
         } else {
-            await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
-                method: "POST",
-                body: {
-                    channel,
-                    sender_type: "CUSTOMER",
-                    sender_identifier: senderIdentifier,
-                    body,
-                    attachment_urls: [],
-                    metadata: { source: "customer_conversation" }
+            if (uploadedFiles.length) {
+                for (let index = 0; index < uploadedFiles.length; index += 1) {
+                    const file = uploadedFiles[index];
+                    await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
+                        method: "POST",
+                        body: pruneEmpty({
+                            channel,
+                            sender_type: "CUSTOMER",
+                            sender_identifier: senderIdentifier,
+                            file_url: file.file_token,
+                            document_type: "supporting_document",
+                            message_body: index === 0 ? body : "Additional supporting document",
+                            metadata: {
+                                source: "customer_conversation_upload",
+                                drive_file_id: driveFileIdFromToken(file.file_token),
+                                file_name: file.file_name,
+                                mime_type: file.mime_type
+                            }
+                        })
+                    });
                 }
-            });
+            } else {
+                await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
+                    method: "POST",
+                    body: {
+                        channel,
+                        sender_type: "CUSTOMER",
+                        sender_identifier: senderIdentifier,
+                        body,
+                        attachment_urls: [],
+                        metadata: { source: "customer_conversation" }
+                    }
+                });
+            }
         }
 
         pushEvent("Customer continued existing ticket", `A new customer update was added to ${state.selectedTicketId}.`);
@@ -567,6 +600,27 @@ async function api(path, options = {}) {
     return payload;
 }
 
+async function uploadSelectedFiles(files) {
+    const uploads = [];
+    for (const file of files || []) {
+        if (!(file instanceof File) || !file.size) {
+            continue;
+        }
+        const formData = new FormData();
+        formData.append("file", file);
+        const response = await fetch("/v1/files/upload", {
+            method: "POST",
+            body: formData
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.result === "ERROR") {
+            throw new Error(payload.message || `Upload failed for ${file.name}`);
+        }
+        uploads.push(payload.data);
+    }
+    return uploads;
+}
+
 function bindSubmit(id, handler) {
     const form = el(id);
     if (!form) {
@@ -700,4 +754,15 @@ function guessMimeType(url) {
         return "image/jpeg";
     }
     return "application/octet-stream";
+}
+
+function driveFileIdFromToken(token) {
+    return `${token || ""}`.startsWith("drive://") ? token.slice("drive://".length) : null;
+}
+
+function encodeDriveAttachmentToken(file) {
+    const fileId = encodeURIComponent(driveFileIdFromToken(file.file_token) || "");
+    const fileName = encodeURIComponent(file.file_name || "");
+    const mimeType = encodeURIComponent(file.mime_type || "");
+    return `drive://${fileId}?name=${fileName}&mime=${mimeType}`;
 }

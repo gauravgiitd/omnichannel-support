@@ -48,8 +48,9 @@ public class InboundWhatsAppService {
         if (ticketOpt.isPresent()) {
             Ticket ticket = ticketResolutionService.resolveCanonical(ticketOpt.get());
             assertCustomerOwns(customerId, ticket);
-            List<String> docIds = registerWhatsAppDocuments(ticket, customerId, request);
-            List<String> urls = request.attachmentUrls() != null ? request.attachmentUrls() : List.of();
+            List<DocumentDto> documents = registerWhatsAppDocuments(ticket, customerId, request);
+            List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
+            List<String> urls = documents.stream().map(DocumentDto::fileUrl).toList();
             Map<String, Object> metadata = buildWaMetadata(request);
             if (!docIds.isEmpty()) {
                 metadata.put("attachment_ids", docIds);
@@ -95,8 +96,9 @@ public class InboundWhatsAppService {
                         .map(ticketResolutionService::resolveCanonical)
                         .orElseThrow(() -> new ValidationException("ticket not found after create"));
 
-        List<String> docIds = registerWhatsAppDocuments(ticket, customerId, request);
-        List<String> urls = request.attachmentUrls() != null ? request.attachmentUrls() : List.of();
+        List<DocumentDto> documents = registerWhatsAppDocuments(ticket, customerId, request);
+        List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
+        List<String> urls = documents.stream().map(DocumentDto::fileUrl).toList();
         conversationService.enrichLatestMessageWithInboundFiles(ticket, urls, docIds);
 
         auditService.record(
@@ -129,18 +131,28 @@ public class InboundWhatsAppService {
         }
     }
 
-    private List<String> registerWhatsAppDocuments(Ticket ticket, String customerId, InboundWhatsAppRequest request) {
+    private List<DocumentDto> registerWhatsAppDocuments(Ticket ticket, String customerId, InboundWhatsAppRequest request) {
         if (request.attachmentUrls() == null || request.attachmentUrls().isEmpty()) {
             return List.of();
         }
         String claimHint = blankToNull(request.claimIdHint());
         String policyHint = blankToNull(request.policyIdHint());
-        List<String> ids = new ArrayList<>();
+        List<DocumentDto> documents = new ArrayList<>();
         int index = 0;
         for (String url : request.attachmentUrls()) {
             Map<String, Object> meta = new HashMap<>();
             meta.put("source", "whatsapp_inbound");
             meta.put("attachment_index", index++);
+            DriveFileToken token = DriveFileToken.parse(url);
+            if (token != null) {
+                meta.put("drive_file_id", token.fileId());
+                if (token.fileName() != null && !token.fileName().isBlank()) {
+                    meta.put("file_name", token.fileName());
+                }
+                if (token.mimeType() != null && !token.mimeType().isBlank()) {
+                    meta.put("mime_type", token.mimeType());
+                }
+            }
             DocumentDto d =
                     documentService.register(
                             ticket,
@@ -151,9 +163,9 @@ public class InboundWhatsAppService {
                             claimHint,
                             policyHint,
                             meta);
-            ids.add(d.documentId());
+            documents.add(d);
         }
-        return ids;
+        return documents;
     }
 
     private static String blankToNull(String s) {
@@ -188,6 +200,37 @@ public class InboundWhatsAppService {
         Map<String, Object> meta = new HashMap<>();
         meta.put("wa_message_id", request.waMessageId());
         return meta;
+    }
+
+    private record DriveFileToken(String fileId, String fileName, String mimeType) {
+        static DriveFileToken parse(String raw) {
+            if (raw == null || !raw.startsWith("drive://")) {
+                return null;
+            }
+            String remainder = raw.substring("drive://".length());
+            String fileId = remainder;
+            String fileName = null;
+            String mimeType = null;
+            int queryIndex = remainder.indexOf('?');
+            if (queryIndex >= 0) {
+                fileId = remainder.substring(0, queryIndex);
+                String query = remainder.substring(queryIndex + 1);
+                for (String part : query.split("&")) {
+                    int eq = part.indexOf('=');
+                    if (eq < 0) {
+                        continue;
+                    }
+                    String key = java.net.URLDecoder.decode(part.substring(0, eq), java.nio.charset.StandardCharsets.UTF_8);
+                    String value = java.net.URLDecoder.decode(part.substring(eq + 1), java.nio.charset.StandardCharsets.UTF_8);
+                    if ("name".equals(key)) {
+                        fileName = value;
+                    } else if ("mime".equals(key)) {
+                        mimeType = value;
+                    }
+                }
+            }
+            return new DriveFileToken(fileId, fileName, mimeType);
+        }
     }
 
     public enum InboundOutcome {
