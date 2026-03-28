@@ -12,8 +12,8 @@
         <div>
             <p class="eyebrow">Customer Experience</p>
             <p class="hero-copy">
-                The customer UI shows a single support thread regardless of where the issue started. Email, WhatsApp,
-                and app messages all contribute to the same ticket conversation.
+                The customer UI shows a single support thread regardless of where the issue started. WhatsApp and
+                app messages stay in the product, while email replies continue directly from the customer inbox.
             </p>
         </div>
         <div class="hero-actions">
@@ -49,39 +49,11 @@
 
                 <div id="startSupportBody">
                     <div class="tab-row">
-                        <button class="tab-button active" data-tab="email">Email</button>
-                        <button class="tab-button" data-tab="whatsapp">WhatsApp</button>
+                        <button class="tab-button active" data-tab="whatsapp">WhatsApp</button>
                         <button class="tab-button" data-tab="app-message">In-App Message</button>
                     </div>
 
-                    <div class="tab-panel active" data-panel="email">
-                        <form id="emailForm" class="stack-form">
-                            <div class="grid two">
-                                <label>
-                                    From email
-                                    <input name="fromAddress" type="email" value="" readonly required>
-                                </label>
-                            </div>
-                            <label>
-                                Subject
-                                <input name="subject" type="text" value="My policy issue" required>
-                            </label>
-                            <label>
-                                Email message
-                                <textarea name="bodyText" rows="4" required>I need help with my motor policy endorsement. I am starting this issue over email.</textarea>
-                            </label>
-                            <label>
-                                Attach documents
-                                <input name="attachments" type="file" multiple>
-                            </label>
-                            <div class="form-footer">
-                                <p>The customer begins on `support@acko.com`, but the system keeps the ticket, not the inbox, as the source of truth.</p>
-                                <button type="submit">Send support email</button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <div class="tab-panel" data-panel="whatsapp">
+                    <div class="tab-panel active" data-panel="whatsapp">
                         <form id="whatsappForm" class="stack-form">
                             <div class="grid two">
                                 <label>
@@ -127,16 +99,16 @@
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Customer App</p>
-                        <h3 id="customerAppHeading">No ticket selected</h3>
+                        <h3 id="customerAppHeading">Your tickets</h3>
                     </div>
                 </div>
                 <div class="customer-app-shell">
                     <div class="app-header-strip">
                         <div>
                             <strong>Support conversation</strong>
-                            <p id="customerAppSubhead">Open the app to see the full history across email, WhatsApp, and agent replies.</p>
+                            <p id="customerAppSubhead">Click any ticket below to expand its full conversation and continue the thread.</p>
                         </div>
-                        <span class="status-pill good" id="customerStatusPill">Synced</span>
+                        <span class="status-pill good" id="customerStatusPill">Ready</span>
                     </div>
                     <div class="subpanel ticket-list-shell">
                         <div class="subpanel-head">
@@ -144,34 +116,6 @@
                             <span id="customerTicketCount" class="small-note">0 tickets</span>
                         </div>
                         <div id="customerTicketList" class="queue-stack empty-state">No tickets yet.</div>
-                    </div>
-                    <div id="customerChat" class="chat-thread empty-state">No support ticket loaded in the app yet.</div>
-                    <div id="customerConversationActions" class="conversation-actions hidden">
-                        <form id="customerComposeForm" class="stack-form compact">
-                            <div class="grid two">
-                                <label>
-                                    Continue via
-                                    <select name="channel">
-                                        <option value="UI">APP</option>
-                                        <option value="WHATSAPP">WHATSAPP</option>
-                                        <option value="EMAIL">EMAIL</option>
-                                    </select>
-                                </label>
-                                <label>
-                                    Sender identifier
-                                    <input name="senderIdentifier" type="text" value="">
-                                </label>
-                            </div>
-                            <label>
-                                Message
-                                <textarea name="body" rows="4" required>I want to continue on this same support ticket.</textarea>
-                            </label>
-                            <label>
-                                Attach documents
-                                <input name="attachments" type="file" multiple>
-                            </label>
-                            <button type="submit">Send update to this ticket</button>
-                        </form>
                     </div>
                 </div>
             </section>

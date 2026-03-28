@@ -78,23 +78,14 @@
                                 <h4>Reply as agent</h4>
                             </div>
                             <form id="replyForm" class="stack-form compact">
-                                <div class="grid two">
-                                    <label>
-                                        Reply channel
-                                        <select name="channel">
-                                            <option value="EMAIL">EMAIL</option>
-                                            <option value="WHATSAPP">WHATSAPP</option>
-                                            <option value="UI">UI</option>
-                                        </select>
-                                    </label>
-                                    <label>
-                                        Agent identifier
-                                        <input name="senderIdentifier" type="text" value="">
-                                    </label>
-                                </div>
+                                <p class="small-note">Replies are added to the shared ticket thread from your logged-in agent account.</p>
                                 <label>
                                     Message
                                     <textarea name="body" rows="4" required>I can see your email and WhatsApp documents on the same ticket. The policy servicing team is handling this now.</textarea>
+                                </label>
+                                <label>
+                                    Attach documents
+                                    <input name="attachments" type="file" multiple>
                                 </label>
                                 <button type="submit">Send agent reply</button>
                             </form>
@@ -102,96 +93,18 @@
 
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Routing and enrichment</h4>
+                                <h4>Ticket status</h4>
                             </div>
                             <form id="patchForm" class="stack-form compact">
-                                <div class="grid two">
-                                    <label>
-                                        Issue type
-                                        <input name="issueType" type="text" placeholder="policy">
-                                    </label>
-                                    <label>
-                                        Line of business
-                                        <input name="lob" type="text" placeholder="motor">
-                                    </label>
-                                    <label>
-                                        Policy ID
-                                        <input name="policyId" type="text" placeholder="POL-2026-4421">
-                                    </label>
-                                    <label>
-                                        Claim ID
-                                        <input name="claimId" type="text" placeholder="CLM-2026-009">
-                                    </label>
-                                    <label>
-                                        Assigned queue
-                                        <input name="assignedQueue" type="text" placeholder="policy-servicing">
-                                    </label>
-                                    <label>
-                                        Assigned agent
-                                        <input name="assignedAgent" type="text" placeholder="Aditi Sharma">
-                                    </label>
-                                </div>
+                                <p class="small-note">Use this only when the ticket is ready to be closed.</p>
                                 <label>
                                     Status
                                     <select name="status">
                                         <option value="">Leave unchanged</option>
-                                        <option value="OPEN">OPEN</option>
-                                        <option value="ASSIGNED">ASSIGNED</option>
-                                        <option value="PENDING_CUSTOMER">PENDING_CUSTOMER</option>
-                                        <option value="PENDING_INTERNAL">PENDING_INTERNAL</option>
-                                        <option value="RESOLVED">RESOLVED</option>
                                         <option value="CLOSED">CLOSED</option>
-                                        <option value="REOPENED">REOPENED</option>
                                     </select>
                                 </label>
                                 <button type="submit">Update ticket</button>
-                            </form>
-                        </div>
-
-                        <div class="subpanel">
-                            <div class="subpanel-head">
-                                <h4>Add supporting document</h4>
-                            </div>
-                            <form id="documentForm" class="stack-form compact">
-                                <div class="grid two">
-                                    <label>
-                                        Channel
-                                        <select name="channel">
-                                            <option value="EMAIL">EMAIL</option>
-                                            <option value="WHATSAPP">WHATSAPP</option>
-                                            <option value="UI">UI</option>
-                                        </select>
-                                    </label>
-                                    <label>
-                                        Sender
-                                        <select name="senderType">
-                                            <option value="CUSTOMER">CUSTOMER</option>
-                                            <option value="AGENT">AGENT</option>
-                                            <option value="SYSTEM">SYSTEM</option>
-                                        </select>
-                                    </label>
-                                    <label>
-                                        Sender identifier
-                                        <input name="senderIdentifier" type="text" value="ria.mehta@example.com">
-                                    </label>
-                                    <label>
-                                        Document type
-                                        <input name="documentType" type="text" value="supporting_document">
-                                    </label>
-                                    <label>
-                                        File URL
-                                        <input name="fileUrl" type="url" value="https://files.example/support-proof.pdf" required>
-                                    </label>
-                                    <label>
-                                        Policy ID
-                                        <input name="policyId" type="text" placeholder="POL-2026-4421">
-                                    </label>
-                                </div>
-                                <label>
-                                    Message body
-                                    <textarea name="messageBody" rows="3">Adding another document to the same shared ticket.</textarea>
-                                </label>
-                                <button type="submit">Attach document</button>
                             </form>
                         </div>
                     </div>

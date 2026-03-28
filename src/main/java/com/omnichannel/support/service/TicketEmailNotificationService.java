@@ -54,13 +54,17 @@ public class TicketEmailNotificationService {
 
         String toAddress = emailOpt.get();
         String subject = "[" + ticket.getTicketNumber() + "] Your support ticket is open";
+        String ticketUrl = customerTicketUrl(ticket.getTicketNumber());
         String body = """
                 Your support ticket is now open.
 
                 Ticket number: %s
 
-                You can reply directly to this email with more context or attach documents, and we will add them to the same ticket.
-                """.formatted(ticket.getTicketNumber());
+                Open your ticket here:
+                %s
+
+                You can either open the ticket in the customer app using the link above, or reply directly to this email with more context or attach documents. Either way, we will add everything to the same ticket.
+                """.formatted(ticket.getTicketNumber(), ticketUrl);
         String messageId = buildOutboundMessageId(ticket.getTicketNumber(), properties.outboundEmail().fromAddress());
 
         try {
@@ -86,15 +90,16 @@ public class TicketEmailNotificationService {
                     Map.of(
                             "direction", "outbound_ticket_created_email",
                             "email_subject", subject,
-                            "recipient", toAddress));
+                            "recipient", toAddress,
+                            "customer_ticket_url", ticketUrl));
 
             auditService.record(
                     "TICKET_EMAIL_SENT",
                     "Ticket",
                     ticket.getTicketNumber(),
                     "SYSTEM",
-                    "ticket-email",
-                    Map.of("recipient", toAddress, "message_id", stripAngles(messageId)));
+                "ticket-email",
+                Map.of("recipient", toAddress, "message_id", stripAngles(messageId)));
         } catch (Exception ex) {
             auditService.record(
                     "TICKET_EMAIL_FAILED",
@@ -102,8 +107,16 @@ public class TicketEmailNotificationService {
                     ticket.getTicketNumber(),
                     "SYSTEM",
                     "ticket-email",
-                    Map.of("recipient", toAddress, "error", ex.getMessage() != null ? ex.getMessage() : "unknown"));
+                Map.of("recipient", toAddress, "error", ex.getMessage() != null ? ex.getMessage() : "unknown"));
         }
+    }
+
+    private String customerTicketUrl(String ticketNumber) {
+        String baseUrl = properties.app() != null ? properties.app().baseUrl() : null;
+        String normalizedBase = (baseUrl == null || baseUrl.isBlank())
+                ? "http://localhost:8080"
+                : baseUrl.replaceAll("/+$", "");
+        return normalizedBase + "/customer?ticket=" + ticketNumber;
     }
 
     private Optional<String> findCustomerEmail(String customerId) {

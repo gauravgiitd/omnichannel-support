@@ -2,12 +2,14 @@ const STORAGE_KEYS = {
     ticketId: "omnichannel.ticketId"
 };
 
+const ticketFromUrl = new URLSearchParams(window.location.search).get("ticket");
+
 const state = {
     view: "landing",
     user: null,
     tickets: [],
     customerTickets: [],
-    selectedTicketId: localStorage.getItem(STORAGE_KEYS.ticketId),
+    selectedTicketId: ticketFromUrl || localStorage.getItem(STORAGE_KEYS.ticketId),
     currentTicket: null,
     messages: [],
     documents: [],
@@ -55,32 +57,6 @@ function bindControls() {
 }
 
 function bindForms() {
-    bindSubmit("emailForm", async (event) => {
-        const data = new FormData(event.currentTarget);
-        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
-
-        const response = await api("/v1/inbound/email", {
-            method: "POST",
-            body: {
-                from_address: state.user.email,
-                to_address: "support@acko.com",
-                subject: data.get("subject"),
-                body_text: data.get("bodyText"),
-                message_id: `email-${Date.now()}`,
-                force_new_ticket: true,
-                attachments: uploadedFiles.map((file) => ({
-                    file_url: file.file_token,
-                    file_name: file.file_name,
-                    mime_type: file.mime_type,
-                    document_type: "email_attachment"
-                }))
-            }
-        });
-
-        pushEvent("Customer started on email", `Email created or updated ${response.data.ticket_number}.`);
-        await refreshBoard(response.data.ticket_number);
-    });
-
     bindSubmit("whatsappForm", async (event) => {
         const data = new FormData(event.currentTarget);
         const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
@@ -146,20 +122,45 @@ function bindForms() {
     bindSubmit("replyForm", async (event) => {
         ensureTicketSelected();
         const data = new FormData(event.currentTarget);
+        const body = data.get("body");
+        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
 
-        await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
-            method: "POST",
-            body: {
-                channel: data.get("channel"),
-                sender_type: "AGENT",
-                sender_identifier: data.get("senderIdentifier"),
-                body: data.get("body"),
-                attachment_urls: [],
-                metadata: { source: "agent_workspace" }
+        if (uploadedFiles.length) {
+            for (let index = 0; index < uploadedFiles.length; index += 1) {
+                const file = uploadedFiles[index];
+                await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
+                    method: "POST",
+                    body: {
+                        channel: "UI",
+                        sender_type: "AGENT",
+                        sender_identifier: state.user.email,
+                        file_url: file.file_token,
+                        document_type: "agent_attachment",
+                        message_body: index === 0 ? body : "Additional agent attachment",
+                        metadata: {
+                            source: "agent_workspace_upload",
+                            drive_file_id: driveFileIdFromToken(file.file_token),
+                            file_name: file.file_name,
+                            mime_type: file.mime_type
+                        }
+                    }
+                });
             }
-        });
+        } else {
+            await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
+                method: "POST",
+                body: {
+                    channel: "UI",
+                    sender_type: "AGENT",
+                    sender_identifier: state.user.email,
+                    body,
+                    attachment_urls: [],
+                    metadata: { source: "agent_workspace" }
+                }
+            });
+        }
 
-        pushEvent("Agent responded", `The agent replied on ${data.get("channel")} while preserving the same thread.`);
+        pushEvent("Agent responded", `The agent replied on UI while preserving the same thread.`);
         await refreshBoard(state.selectedTicketId);
     });
 
@@ -169,99 +170,12 @@ function bindForms() {
         const response = await api(`/v1/tickets/${state.selectedTicketId}`, {
             method: "PATCH",
             body: pruneEmpty({
-                issue_type: data.get("issueType"),
-                lob: data.get("lob"),
-                policy_id: data.get("policyId"),
-                claim_id: data.get("claimId"),
-                assigned_queue: data.get("assignedQueue"),
-                assigned_agent: data.get("assignedAgent"),
                 status: data.get("status")
             })
         });
 
-        pushEvent("Ticket rerouted", `${response.data.ticket_id} now sits in ${response.data.assigned_queue || "triage"}.`);
+        pushEvent("Ticket updated", `${response.data.ticket_id} is now ${response.data.status}.`);
         await refreshBoard(response.data.ticket_id);
-    });
-
-    bindSubmit("documentForm", async (event) => {
-        ensureTicketSelected();
-        const data = new FormData(event.currentTarget);
-        await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
-            method: "POST",
-            body: pruneEmpty({
-                channel: data.get("channel"),
-                sender_type: data.get("senderType"),
-                sender_identifier: data.get("senderIdentifier"),
-                file_url: data.get("fileUrl"),
-                document_type: data.get("documentType"),
-                policy_id: data.get("policyId"),
-                message_body: data.get("messageBody"),
-                metadata: { source: "agent_workspace" }
-            })
-        });
-
-        pushEvent("Document attached", "A new document was captured into the central ticket document layer.");
-        await refreshBoard(state.selectedTicketId);
-    });
-
-    bindSubmit("customerComposeForm", async (event) => {
-        ensureTicketSelected();
-        const data = new FormData(event.currentTarget);
-        const channel = data.get("channel");
-        const senderIdentifier = data.get("senderIdentifier");
-        const body = data.get("body");
-        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
-
-        if (channel === "WHATSAPP") {
-            await api("/v1/inbound/whatsapp", {
-                method: "POST",
-                body: {
-                    wa_message_id: `wa-${Date.now()}`,
-                    from_e164_phone: senderIdentifier,
-                    body_text: body,
-                    ticket_number_hint: state.selectedTicketId,
-                    attachment_urls: uploadedFiles.map(encodeDriveAttachmentToken)
-                }
-            });
-        } else {
-            if (uploadedFiles.length) {
-                for (let index = 0; index < uploadedFiles.length; index += 1) {
-                    const file = uploadedFiles[index];
-                    await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
-                        method: "POST",
-                        body: pruneEmpty({
-                            channel,
-                            sender_type: "CUSTOMER",
-                            sender_identifier: senderIdentifier,
-                            file_url: file.file_token,
-                            document_type: "supporting_document",
-                            message_body: index === 0 ? body : "Additional supporting document",
-                            metadata: {
-                                source: "customer_conversation_upload",
-                                drive_file_id: driveFileIdFromToken(file.file_token),
-                                file_name: file.file_name,
-                                mime_type: file.mime_type
-                            }
-                        })
-                    });
-                }
-            } else {
-                await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
-                    method: "POST",
-                    body: {
-                        channel,
-                        sender_type: "CUSTOMER",
-                        sender_identifier: senderIdentifier,
-                        body,
-                        attachment_urls: [],
-                        metadata: { source: "customer_conversation" }
-                    }
-                });
-            }
-        }
-
-        pushEvent("Customer continued existing ticket", `A new customer update was added to ${state.selectedTicketId}.`);
-        await refreshBoard(state.selectedTicketId);
     });
 
     bindSubmit("adminCleanupForm", async (event) => {
@@ -330,6 +244,7 @@ async function selectTicket(ticketId) {
     syncFormsWithTicket();
     renderAgentWorkspace();
     renderCustomerExperience();
+    renderCustomerTicketList();
     renderQueueBoard();
 }
 
@@ -460,18 +375,16 @@ function renderCustomerExperience() {
         return;
     }
     if (!state.currentTicket) {
-        customerHeading.textContent = "No ticket selected";
-        renderChatThread("customerChat", [], true);
+        customerHeading.textContent = "Your tickets";
+        text("customerAppSubhead", "Click any ticket below to expand its full conversation and continue the thread.");
+        text("customerStatusPill", "Ready");
         return;
     }
 
-    customerHeading.textContent = `${state.currentTicket.ticket_id} in the app`;
-    text("customerAppSubhead", "The app shows the same support conversation, including messages that started on email or continued on WhatsApp.");
+    customerHeading.textContent = `${state.currentTicket.ticket_id} selected`;
+    text("customerAppSubhead", "The expanded ticket shows the same support conversation, including ticket emails, WhatsApp updates, and agent replies.");
     text("customerStatusPill", state.currentTicket.status);
-    toggleConversationActions(true);
     setStartSupportCollapsed(true);
-    setFormValue("#customerComposeForm [name='senderIdentifier']", defaultCustomerSenderIdentifier());
-    renderChatThread("customerChat", state.messages, true);
 }
 
 function renderCustomerTicketList() {
@@ -487,14 +400,19 @@ function renderCustomerTicketList() {
         return;
     }
     container.className = "queue-stack";
-    container.innerHTML = tickets.map(renderTicketCard).join("");
-    container.querySelectorAll(".ticket-card").forEach((card) => {
+    container.innerHTML = tickets.map(renderCustomerTicketAccordion).join("");
+    container.querySelectorAll(".customer-ticket-header").forEach((card) => {
         card.addEventListener("click", () => selectTicket(card.dataset.ticketId).catch(handleError));
     });
+    hydrateExpandedCustomerTicket(container);
 }
 
 function renderChatThread(containerId, messages, customerView) {
     const container = el(containerId);
+    renderChatThreadInElement(container, messages, customerView);
+}
+
+function renderChatThreadInElement(container, messages, customerView) {
     if (!container) {
         return;
     }
@@ -509,6 +427,83 @@ function renderChatThread(containerId, messages, customerView) {
     container.className = "chat-thread";
     container.innerHTML = "";
     messages.forEach((message) => container.appendChild(buildMessageNode(message, customerView)));
+}
+
+function renderCustomerTicketAccordion(ticket) {
+    const active = state.selectedTicketId === ticket.ticket_id;
+    const missingData = !ticket.policy_id && !ticket.claim_id;
+    const statusTone = missingData ? "warning" : "good";
+    return `
+        <article class="ticket-card customer-ticket-card ${active ? "active expanded" : ""}" data-ticket-id="${ticket.ticket_id}">
+            <button type="button" class="customer-ticket-header" data-ticket-id="${ticket.ticket_id}">
+                <div class="customer-ticket-summary">
+                    <div class="bubble-meta">
+                        <strong>${ticket.ticket_id}</strong>
+                        <span class="status-pill ${statusTone}">${missingData ? "missing data" : "ready"}</span>
+                    </div>
+                    <div class="bubble-meta">
+                        <span class="badge">${ticket.source_channel}</span>
+                        <span class="badge">${ticket.status}</span>
+                        <span class="badge">${ticket.assigned_queue || "triage"}</span>
+                    </div>
+                    <p class="ticket-supporting">${ticket.issue_type || "unclassified"} • ${ticket.customer_id}</p>
+                </div>
+                <span class="customer-ticket-chevron">${active ? "Hide" : "Open"}</span>
+            </button>
+            ${active ? `
+                <div class="customer-ticket-body" data-ticket-body="${ticket.ticket_id}">
+                    <div class="customer-ticket-details">
+                        <span class="badge">Customer ${ticket.customer_id}</span>
+                        ${ticket.policy_id ? `<span class="badge">Policy ${escapeHtml(ticket.policy_id)}</span>` : ""}
+                        ${ticket.claim_id ? `<span class="badge">Claim ${escapeHtml(ticket.claim_id)}</span>` : ""}
+                    </div>
+                    <div class="chat-thread customer-ticket-chat empty-state">Loading conversation...</div>
+                    <form id="customerComposeForm" class="stack-form compact customer-compose-form">
+                        <div class="grid two">
+                            <label>
+                                Continue via
+                                <select name="channel">
+                                    <option value="UI">APP</option>
+                                    <option value="WHATSAPP">WHATSAPP</option>
+                                </select>
+                            </label>
+                            <label>
+                                Sender identifier
+                                <input name="senderIdentifier" type="text" value="">
+                            </label>
+                        </div>
+                        <label>
+                            Message
+                            <textarea name="body" rows="4" required>I want to continue on this same support ticket.</textarea>
+                        </label>
+                        <label>
+                            Attach documents
+                            <input name="attachments" type="file" multiple>
+                        </label>
+                        <p class="small-note">For email responses, reply directly to the ticket email in your inbox.</p>
+                        <button type="submit">Send update to this ticket</button>
+                    </form>
+                </div>
+            ` : ""}
+        </article>
+    `;
+}
+
+function hydrateExpandedCustomerTicket(container) {
+    if (!container || !state.currentTicket || state.selectedTicketId !== state.currentTicket.ticket_id) {
+        return;
+    }
+    const body = container.querySelector(`[data-ticket-body="${state.currentTicket.ticket_id}"]`);
+    if (!body) {
+        return;
+    }
+    const chatContainer = body.querySelector(".customer-ticket-chat");
+    renderChatThreadInElement(chatContainer, state.messages, true);
+    const senderField = body.querySelector("[name='senderIdentifier']");
+    if (senderField) {
+        senderField.value = defaultCustomerSenderIdentifier();
+    }
+    bindDynamicCustomerComposeForm(body.querySelector("#customerComposeForm"));
 }
 
 function buildMessageNode(message, customerView) {
@@ -561,16 +556,7 @@ function syncFormsWithTicket() {
     if (!state.currentTicket) {
         return;
     }
-    setFormValue("#documentForm [name='policyId']", state.currentTicket.policy_id || "");
-    setFormValue("#patchForm [name='issueType']", state.currentTicket.issue_type || "");
-    setFormValue("#patchForm [name='lob']", state.currentTicket.lob || "");
-    setFormValue("#patchForm [name='policyId']", state.currentTicket.policy_id || "");
-    setFormValue("#patchForm [name='claimId']", state.currentTicket.claim_id || "");
-    setFormValue("#patchForm [name='assignedQueue']", state.currentTicket.assigned_queue || "");
-    setFormValue("#patchForm [name='assignedAgent']", state.currentTicket.assigned_agent || "");
     setFormValue("#patchForm [name='status']", state.currentTicket.status || "");
-    setFormValue("#customerComposeForm [name='senderIdentifier']", defaultCustomerSenderIdentifier());
-    setFormValue("#replyForm [name='senderIdentifier']", state.user ? state.user.email : "");
 }
 
 function clearWorkspace() {
@@ -583,7 +569,11 @@ function clearWorkspace() {
         documentList.className = "document-list empty-state";
         documentList.textContent = "Documents shared from any channel appear here.";
     }
-    toggleConversationActions(false);
+    state.currentTicket = null;
+    state.messages = [];
+    state.documents = [];
+    renderCustomerExperience();
+    renderCustomerTicketList();
     setStartSupportCollapsed(false);
 }
 
@@ -603,14 +593,6 @@ function setStartSupportCollapsed(collapsed) {
     }
     body.classList.toggle("collapsed", collapsed);
     button.textContent = collapsed ? "Open new ticket" : "Hide new ticket form";
-}
-
-function toggleConversationActions(visible) {
-    const panel = el("customerConversationActions");
-    if (!panel) {
-        return;
-    }
-    panel.classList.toggle("hidden", !visible);
 }
 
 function pushEvent(title, copy) {
@@ -702,8 +684,94 @@ function ensureTicketSelected() {
     }
 }
 
+async function submitCustomerComposeForm(event) {
+    ensureTicketSelected();
+    const data = new FormData(event.currentTarget);
+    const channel = data.get("channel");
+    const senderIdentifier = data.get("senderIdentifier");
+    const body = data.get("body");
+    const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
+
+    if (channel === "WHATSAPP") {
+        await api("/v1/inbound/whatsapp", {
+            method: "POST",
+            body: {
+                wa_message_id: `wa-${Date.now()}`,
+                from_e164_phone: senderIdentifier,
+                body_text: body,
+                ticket_number_hint: state.selectedTicketId,
+                attachment_urls: uploadedFiles.map(encodeDriveAttachmentToken)
+            }
+        });
+    } else if (uploadedFiles.length) {
+        for (let index = 0; index < uploadedFiles.length; index += 1) {
+            const file = uploadedFiles[index];
+            await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
+                method: "POST",
+                body: pruneEmpty({
+                    channel,
+                    sender_type: "CUSTOMER",
+                    sender_identifier: senderIdentifier,
+                    file_url: file.file_token,
+                    document_type: "supporting_document",
+                    message_body: index === 0 ? body : "Additional supporting document",
+                    metadata: {
+                        source: "customer_conversation_upload",
+                        drive_file_id: driveFileIdFromToken(file.file_token),
+                        file_name: file.file_name,
+                        mime_type: file.mime_type
+                    }
+                })
+            });
+        }
+    } else {
+        await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
+            method: "POST",
+            body: {
+                channel,
+                sender_type: "CUSTOMER",
+                sender_identifier: senderIdentifier,
+                body,
+                attachment_urls: [],
+                metadata: { source: "customer_conversation" }
+            }
+        });
+    }
+
+    pushEvent("Customer continued existing ticket", `A new customer update was added to ${state.selectedTicketId}.`);
+    await refreshBoard(state.selectedTicketId);
+}
+
+function bindDynamicCustomerComposeForm(form) {
+    if (!form || form.dataset.bound === "true") {
+        return;
+    }
+    form.dataset.bound = "true";
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+            await submitCustomerComposeForm(event);
+        } catch (error) {
+            handleError(error);
+        }
+    });
+}
+
 function handleError(error) {
     pushEvent("Action failed", error.message || "Something went wrong.");
+}
+
+function syncTicketUrl(ticketId) {
+    if (state.view !== "customer" || !window.history || !window.location) {
+        return;
+    }
+    const url = new URL(window.location.href);
+    if (ticketId) {
+        url.searchParams.set("ticket", ticketId);
+    } else {
+        url.searchParams.delete("ticket");
+    }
+    window.history.replaceState({}, "", url);
 }
 
 async function loadSession() {
@@ -714,6 +782,7 @@ async function loadSession() {
 function persistTicketId(ticketId) {
     state.selectedTicketId = ticketId;
     localStorage.setItem(STORAGE_KEYS.ticketId, ticketId);
+    syncTicketUrl(ticketId);
 }
 
 function syncUserIdentity() {
@@ -728,9 +797,7 @@ function syncUserIdentity() {
     text("adminIdentity", state.user.roles && state.user.roles.includes("ROLE_ADMIN")
         ? `Signed in as ${state.user.name || state.user.email}`
         : state.user.email);
-    setFormValue("#emailForm [name='fromAddress']", state.user.email);
     setFormValue("#customerComposeForm [name='senderIdentifier']", defaultCustomerSenderIdentifier());
-    setFormValue("#replyForm [name='senderIdentifier']", state.user.email);
 }
 
 function el(id) {

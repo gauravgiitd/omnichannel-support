@@ -52,9 +52,7 @@ public class DocumentContentController {
                                 .filename(fileName != null ? fileName : documentId, StandardCharsets.UTF_8)
                                 .build()
                                 .toString())
-                .contentType(mimeType != null && !mimeType.isBlank()
-                        ? MediaType.parseMediaType(mimeType)
-                        : MediaType.APPLICATION_OCTET_STREAM)
+                .contentType(safeMediaType(mimeType))
                 .body(bytes);
     }
 
@@ -71,5 +69,16 @@ public class DocumentContentController {
 
     private static String stringValue(Object value) {
         return value == null ? null : value.toString();
+    }
+
+    private static MediaType safeMediaType(String mimeType) {
+        if (mimeType == null || mimeType.isBlank()) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+        try {
+            return MediaType.parseMediaType(mimeType);
+        } catch (Exception ex) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
     }
 }

@@ -319,6 +319,68 @@ label {
     transition: transform 150ms ease, border-color 150ms ease;
 }
 
+.customer-ticket-card {
+    padding: 0;
+    overflow: hidden;
+}
+
+.customer-ticket-header {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+}
+
+.customer-ticket-header:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.customer-ticket-summary {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.customer-ticket-chevron {
+    flex: 0 0 auto;
+    align-self: center;
+    color: var(--accent-strong);
+    font-weight: 700;
+}
+
+.customer-ticket-body {
+    display: grid;
+    gap: 16px;
+    padding: 0 18px 18px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.28);
+}
+
+.customer-ticket-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 16px;
+}
+
+.customer-ticket-chat {
+    min-height: 180px;
+}
+
+.customer-compose-form {
+    padding: 16px;
+    border-radius: 20px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.72);
+}
+
 .ticket-card:hover,
 .ticket-card.active {
     transform: translateY(-2px);
