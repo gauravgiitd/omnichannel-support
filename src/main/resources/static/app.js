@@ -436,18 +436,6 @@ function renderCustomerTicketAccordion(ticket) {
                     </div>
                     <div class="chat-thread customer-ticket-chat empty-state">Loading conversation...</div>
                     <form id="customerComposeForm" class="stack-form compact customer-compose-form">
-                        <div class="grid two">
-                            <label>
-                                Continue via
-                                <select name="channel">
-                                    <option value="UI">APP</option>
-                                </select>
-                            </label>
-                            <label>
-                                Sender identifier
-                                <input name="senderIdentifier" type="text" value="">
-                            </label>
-                        </div>
                         <label>
                             Message
                             <textarea name="body" rows="4" required>I want to continue on this same support ticket.</textarea>
@@ -475,10 +463,6 @@ function hydrateExpandedCustomerTicket(container) {
     }
     const chatContainer = body.querySelector(".customer-ticket-chat");
     renderChatThreadInElement(chatContainer, state.messages, true);
-    const senderField = body.querySelector("[name='senderIdentifier']");
-    if (senderField) {
-        senderField.value = defaultCustomerSenderIdentifier();
-    }
     bindDynamicCustomerComposeForm(body.querySelector("#customerComposeForm"));
 }
 
@@ -664,8 +648,6 @@ function ensureTicketSelected() {
 async function submitCustomerComposeForm(event) {
     ensureTicketSelected();
     const data = new FormData(event.currentTarget);
-    const channel = data.get("channel");
-    const senderIdentifier = data.get("senderIdentifier");
     const body = data.get("body");
     const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
 
@@ -675,9 +657,9 @@ async function submitCustomerComposeForm(event) {
             await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
                 method: "POST",
                 body: pruneEmpty({
-                    channel,
+                    channel: "UI",
                     sender_type: "CUSTOMER",
-                    sender_identifier: senderIdentifier,
+                    sender_identifier: state.user.email,
                     file_url: file.file_token,
                     document_type: "supporting_document",
                     message_body: index === 0 ? body : "Additional supporting document",
@@ -694,9 +676,9 @@ async function submitCustomerComposeForm(event) {
         await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
             method: "POST",
             body: {
-                channel,
+                channel: "UI",
                 sender_type: "CUSTOMER",
-                sender_identifier: senderIdentifier,
+                sender_identifier: state.user.email,
                 body,
                 attachment_urls: [],
                 metadata: { source: "customer_conversation" }
@@ -775,7 +757,6 @@ function syncUserIdentity() {
     text("adminIdentity", state.user.roles && state.user.roles.includes("ROLE_ADMIN")
         ? `Signed in as ${state.user.name || state.user.email}`
         : state.user.email);
-    setFormValue("#customerComposeForm [name='senderIdentifier']", defaultCustomerSenderIdentifier());
 }
 
 function el(id) {
@@ -833,7 +814,24 @@ function escapeHtml(textValue) {
 }
 
 function formatDate(value) {
-    return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+    const normalizedValue = normalizeDateValue(value);
+    return new Intl.DateTimeFormat("en-IN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "Asia/Kolkata",
+        hour12: true
+    }).format(new Date(normalizedValue));
+}
+
+function normalizeDateValue(value) {
+    if (typeof value === "number") {
+        return value < 1_000_000_000_000 ? value * 1000 : value;
+    }
+    if (typeof value === "string" && /^\d+$/.test(value)) {
+        const parsed = Number(value);
+        return parsed < 1_000_000_000_000 ? parsed * 1000 : parsed;
+    }
+    return value;
 }
 
 function guessMimeType(url) {
