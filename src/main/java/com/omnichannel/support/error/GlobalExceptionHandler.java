@@ -1,6 +1,7 @@
 package com.omnichannel.support.error;
 
 import com.omnichannel.support.dto.ApiResponse;
+import org.springframework.security.access.AccessDeniedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -41,6 +42,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleApplication(ApplicationException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(ex.getMessage(), ex.getErrorCode(), HttpStatus.BAD_REQUEST.value()));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error(ex.getMessage(), "FORBIDDEN", HttpStatus.FORBIDDEN.value()));
     }
 
     @ExceptionHandler(Exception.class)

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body data-view="login">
+<div class="page-shell">
+    <header class="hero">
+        <div>
+            <p class="eyebrow">Google Authentication</p>
+            <p class="hero-copy">
+                Sign in with Google to continue to the customer experience, or use an approved agent Google account to
+                access the agent workspace.
+            </p>
+        </div>
+        <div class="hero-actions">
+            <a class="route-link" href="/">Back to home</a>
+        </div>
+    </header>
+
+    <section class="surface">
+        <div class="route-grid">
+            <article class="route-card">
+                <p class="eyebrow">Customer</p>
+                <h2>Google sign-in for customers</h2>
+                <p>Any signed-in Google account can access its own support conversation and tickets.</p>
+                <a class="route-link primary-link" href="/oauth2/authorization/google">Continue with Google</a>
+            </article>
+            <article class="route-card">
+                <p class="eyebrow">Agent</p>
+                <h2>Google sign-in for agents</h2>
+                <p>Agent access is restricted to approved Google accounts, with optional Google Group validation.</p>
+                <a class="route-link" href="/oauth2/authorization/google">Sign in as agent</a>
+            </article>
+        </div>
+    </section>
+</div>
+</body>
+</html>

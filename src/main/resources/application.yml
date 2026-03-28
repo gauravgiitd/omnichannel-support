@@ -1,6 +1,17 @@
 spring:
   application:
     name: omnichannel-support-platform
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:}
+            client-secret: ${GOOGLE_CLIENT_SECRET:}
+            scope:
+              - openid
+              - profile
+              - email
   jackson:
     default-property-inclusion: non_null
   jpa:
@@ -29,6 +40,12 @@ management:
         include: health,info
 
 support:
+  auth:
+    agent:
+      allowed-emails: ${AGENT_ALLOWED_EMAILS:}
+      allowed-google-groups: ${AGENT_ALLOWED_GOOGLE_GROUPS:}
+      workspace-admin-email: ${GOOGLE_WORKSPACE_ADMIN_EMAIL:}
+      service-account-json-base64: ${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64:}
   outbound-email:
     from-address: support@company.example
     from-display-name: Company Support

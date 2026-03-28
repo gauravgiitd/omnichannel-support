@@ -7,6 +7,9 @@ import com.omnichannel.support.dto.MessageDto;
 import com.omnichannel.support.dto.PatchTicketRequest;
 import com.omnichannel.support.dto.PostMessageRequest;
 import com.omnichannel.support.dto.TicketDto;
+import com.omnichannel.support.security.AppUser;
+import com.omnichannel.support.security.AuthenticatedUserService;
+import com.omnichannel.support.security.TicketAccessService;
 import com.omnichannel.support.service.TicketMergeService;
 import com.omnichannel.support.service.TicketService;
 import jakarta.validation.Valid;
@@ -15,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,6 +34,8 @@ public class TicketController {
 
     private final TicketService ticketService;
     private final TicketMergeService ticketMergeService;
+    private final TicketAccessService ticketAccessService;
+    private final AuthenticatedUserService authenticatedUserService;
 
     @GetMapping
     public ResponseEntity<ApiResponse<List<TicketDto>>> listTickets() {
@@ -42,8 +48,30 @@ public class TicketController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(created));
     }
 
+    @PostMapping(path = "/me", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<TicketDto>> createMyTicket(
+            @Valid @RequestBody CreateTicketRequest request, Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        CreateTicketRequest trustedRequest = new CreateTicketRequest(
+                user.customerId(),
+                request.issueType(),
+                request.lob(),
+                request.claimId(),
+                request.policyId(),
+                request.priority(),
+                request.sourceChannel(),
+                request.initialMessageBody(),
+                user.email(),
+                request.initialMessageMetadata(),
+                request.initialExternalThreadRef());
+        TicketDto created = ticketService.createTicket(trustedRequest);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(created));
+    }
+
     @GetMapping("/{ticketId}")
-    public ResponseEntity<ApiResponse<TicketDto>> getTicket(@PathVariable("ticketId") String ticketId) {
+    public ResponseEntity<ApiResponse<TicketDto>> getTicket(
+            @PathVariable("ticketId") String ticketId, Authentication authentication) {
+        ticketAccessService.assertCanAccessTicket(authentication, ticketId);
         return ResponseEntity.ok(ApiResponse.success(ticketService.getTicket(ticketId)));
     }
 
@@ -54,14 +82,31 @@ public class TicketController {
     }
 
     @GetMapping("/{ticketId}/messages")
-    public ResponseEntity<ApiResponse<List<MessageDto>>> listMessages(@PathVariable("ticketId") String ticketId) {
+    public ResponseEntity<ApiResponse<List<MessageDto>>> listMessages(
+            @PathVariable("ticketId") String ticketId, Authentication authentication) {
+        ticketAccessService.assertCanAccessTicket(authentication, ticketId);
         return ResponseEntity.ok(ApiResponse.success(ticketService.listMessages(ticketId)));
     }
 
     @PostMapping(path = "/{ticketId}/messages", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiResponse<MessageDto>> postMessage(
-            @PathVariable("ticketId") String ticketId, @Valid @RequestBody PostMessageRequest request) {
-        MessageDto message = ticketService.postMessage(ticketId, request);
+            @PathVariable("ticketId") String ticketId,
+            @Valid @RequestBody PostMessageRequest request,
+            Authentication authentication) {
+        ticketAccessService.assertCanAccessTicket(authentication, ticketId);
+        PostMessageRequest trustedRequest = request;
+        if (!authenticatedUserService.isAgent(authentication)) {
+            AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+            trustedRequest = new PostMessageRequest(
+                    request.channel(),
+                    com.omnichannel.support.domain.SenderType.CUSTOMER,
+                    user.email(),
+                    request.body(),
+                    request.attachmentUrls(),
+                    request.externalThreadRef(),
+                    request.metadata());
+        }
+        MessageDto message = ticketService.postMessage(ticketId, trustedRequest);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(message));
     }
 

@@ -1,31 +1,31 @@
 const STORAGE_KEYS = {
-    customerId: "omnichannel.customerId",
     ticketId: "omnichannel.ticketId"
 };
 
 const state = {
     view: "landing",
+    user: null,
     tickets: [],
     customerTickets: [],
     selectedTicketId: localStorage.getItem(STORAGE_KEYS.ticketId),
     currentTicket: null,
     messages: [],
     documents: [],
-    events: [],
-    customerId: localStorage.getItem(STORAGE_KEYS.customerId) || "CUST-DEMO-001"
+    events: []
 };
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
     state.view = document.body.dataset.view || "landing";
-    if (state.view === "landing") {
+    if (state.view === "landing" || state.view === "login") {
         return;
     }
 
     setupTabs();
     bindControls();
     bindForms();
-    syncCustomerIdentity();
-    refreshBoard();
+    await loadSession();
+    syncUserIdentity();
+    await refreshBoard();
 });
 
 function setupTabs() {
@@ -50,27 +50,21 @@ function setupTabs() {
 
 function bindControls() {
     bindClick("refreshBoard", () => refreshBoard(state.selectedTicketId));
-    bindClick("scenarioUnifiedJourney", runUnifiedJourneyScenario);
-    bindClick("scenarioMissingData", runMissingDataScenario);
     bindClick("toggleStartSupport", toggleStartSupport);
 }
 
 function bindForms() {
     bindSubmit("emailForm", async (event) => {
         const data = new FormData(event.currentTarget);
-        setCustomerId(data.get("customerIdHint"));
 
         const response = await api("/v1/inbound/email", {
             method: "POST",
             body: {
-                from_address: data.get("fromAddress"),
+                from_address: state.user.email,
                 to_address: "support@acko.com",
                 subject: data.get("subject"),
                 body_text: data.get("bodyText"),
                 message_id: `email-${Date.now()}`,
-                customer_id_hint: blankOrNull(data.get("customerIdHint")),
-                policy_id_hint: blankOrNull(data.get("policyIdHint")),
-                claim_id_hint: blankOrNull(data.get("claimIdHint")),
                 force_new_ticket: true,
                 attachments: parseCsv(data.get("attachments")).map((url, index) => ({
                     file_url: url,
@@ -87,7 +81,6 @@ function bindForms() {
 
     bindSubmit("whatsappForm", async (event) => {
         const data = new FormData(event.currentTarget);
-        setCustomerId(data.get("customerIdHint"));
 
         const response = await api("/v1/inbound/whatsapp", {
             method: "POST",
@@ -95,9 +88,6 @@ function bindForms() {
                 wa_message_id: `wa-${Date.now()}`,
                 from_e164_phone: data.get("fromE164Phone"),
                 body_text: data.get("bodyText"),
-                customer_id_hint: blankOrNull(data.get("customerIdHint")),
-                ticket_number_hint: blankOrNull(data.get("ticketNumberHint")),
-                policy_id_hint: blankOrNull(data.get("policyIdHint")),
                 force_new_ticket: true,
                 attachment_urls: parseCsv(data.get("attachmentUrls"))
             }
@@ -109,11 +99,9 @@ function bindForms() {
 
     bindSubmit("appForm", async (event) => {
         const data = new FormData(event.currentTarget);
-        setCustomerId(data.get("customerId"));
-        const response = await api("/v1/tickets", {
+        const response = await api("/v1/tickets/me", {
             method: "POST",
             body: {
-                customer_id: data.get("customerId"),
                 issue_type: "policy",
                 lob: "motor",
                 claim_id: null,
@@ -121,7 +109,7 @@ function bindForms() {
                 priority: "MEDIUM",
                 source_channel: "UI",
                 initial_message_body: data.get("initialMessageBody"),
-                sender_identifier: data.get("customerId"),
+                sender_identifier: state.user.email,
                 initial_message_metadata: { source: "customer_app" },
                 initial_external_thread_ref: `ui-${Date.now()}`
             }
@@ -207,7 +195,6 @@ function bindForms() {
                     wa_message_id: `wa-${Date.now()}`,
                     from_e164_phone: senderIdentifier,
                     body_text: body,
-                    customer_id_hint: state.customerId,
                     ticket_number_hint: state.selectedTicketId,
                     attachment_urls: fileUrl ? [fileUrl] : []
                 }
@@ -246,7 +233,7 @@ function bindForms() {
 
 async function refreshBoard(preferredTicketId) {
     if (state.view === "customer") {
-        const customerResponse = await api(`/v1/customers/${state.customerId}/tickets`);
+        const customerResponse = await api("/v1/customers/me/tickets");
         state.customerTickets = customerResponse.data;
         state.tickets = customerResponse.data;
     } else {
@@ -268,8 +255,7 @@ async function refreshBoard(preferredTicketId) {
 
 function findRelevantTicketId() {
     const list = state.view === "customer" ? state.customerTickets : state.tickets;
-    const customerMatch = list.find((ticket) => ticket.customer_id === state.customerId);
-    return customerMatch ? customerMatch.ticket_id : (state.tickets[0] ? state.tickets[0].ticket_id : null);
+    return list[0] ? list[0].ticket_id : null;
 }
 
 async function selectTicket(ticketId) {
@@ -283,7 +269,6 @@ async function selectTicket(ticketId) {
     state.currentTicket = ticketResponse.data;
     state.messages = messageResponse.data;
     state.documents = documentResponse.data;
-    setCustomerId(state.currentTicket.customer_id);
 
     syncFormsWithTicket();
     renderAgentWorkspace();
@@ -406,7 +391,7 @@ function renderCustomerExperience() {
     text("customerStatusPill", state.currentTicket.status);
     toggleConversationActions(true);
     setStartSupportCollapsed(true);
-    setFormValue("#customerComposeForm [name='senderIdentifier']", state.currentTicket.customer_id);
+    setFormValue("#customerComposeForm [name='senderIdentifier']", defaultCustomerSenderIdentifier());
     renderChatThread("customerChat", state.messages, true);
 }
 
@@ -497,8 +482,6 @@ function syncFormsWithTicket() {
     if (!state.currentTicket) {
         return;
     }
-    setFormValue("#whatsappForm [name='ticketNumberHint']", state.currentTicket.ticket_id);
-    setFormValue("#appForm [name='ticketIdHint']", state.currentTicket.ticket_id);
     setFormValue("#documentForm [name='policyId']", state.currentTicket.policy_id || "");
     setFormValue("#patchForm [name='issueType']", state.currentTicket.issue_type || "");
     setFormValue("#patchForm [name='lob']", state.currentTicket.lob || "");
@@ -507,7 +490,8 @@ function syncFormsWithTicket() {
     setFormValue("#patchForm [name='assignedQueue']", state.currentTicket.assigned_queue || "");
     setFormValue("#patchForm [name='assignedAgent']", state.currentTicket.assigned_agent || "");
     setFormValue("#patchForm [name='status']", state.currentTicket.status || "");
-    setFormValue("#customerComposeForm [name='senderIdentifier']", state.currentTicket.customer_id);
+    setFormValue("#customerComposeForm [name='senderIdentifier']", defaultCustomerSenderIdentifier());
+    setFormValue("#replyForm [name='senderIdentifier']", state.user ? state.user.email : "");
 }
 
 function clearWorkspace() {
@@ -569,107 +553,6 @@ function pushEvent(title, copy) {
     `).join("");
 }
 
-async function runUnifiedJourneyScenario() {
-    try {
-        setCustomerId("CUST-DEMO-001");
-
-        const email = await api("/v1/inbound/email", {
-            method: "POST",
-            body: {
-                from_address: "ria.mehta@example.com",
-                to_address: "support@acko.com",
-                subject: "My policy issue",
-                body_text: "I am starting my support request over email for a policy endorsement.",
-                message_id: `email-${Date.now()}`,
-                customer_id_hint: "CUST-DEMO-001",
-                policy_id_hint: "POL-2026-4421",
-                attachments: [{
-                    file_url: "https://files.example/policy-copy.pdf",
-                    file_name: "policy-copy.pdf",
-                    mime_type: "application/pdf",
-                    document_type: "policy_copy"
-                }]
-            }
-        });
-
-        const ticketId = email.data.ticket_number;
-
-        await api("/v1/inbound/whatsapp", {
-            method: "POST",
-            body: {
-                wa_message_id: `wa-${Date.now()}`,
-                from_e164_phone: "+919900001234",
-                body_text: "Continuing the same issue here and sharing my RC document.",
-                customer_id_hint: "CUST-DEMO-001",
-                ticket_number_hint: ticketId,
-                policy_id_hint: "POL-2026-4421",
-                attachment_urls: ["https://files.example/vehicle-rc.pdf"]
-            }
-        });
-
-        await api(`/v1/tickets/${ticketId}/messages`, {
-            method: "POST",
-            body: {
-                channel: "EMAIL",
-                sender_type: "AGENT",
-                sender_identifier: "aditi.sharma@acko.com",
-                body: "I can see both your email and WhatsApp updates on the same ticket. You can also follow this in the app.",
-                attachment_urls: [],
-                metadata: { source: "scenario" }
-            }
-        });
-
-        await api(`/v1/tickets/${ticketId}/messages`, {
-            method: "POST",
-            body: {
-                channel: "UI",
-                sender_type: "CUSTOMER",
-                sender_identifier: "CUST-DEMO-001",
-                body: "I opened the app and can see the full thread. Please let me know the next step.",
-                attachment_urls: [],
-                metadata: { source: "scenario" }
-            }
-        });
-
-        pushEvent("Unified journey complete", `${ticketId} now demonstrates email start, WhatsApp continuation, and full app visibility.`);
-        await refreshBoard(ticketId);
-    } catch (error) {
-        handleError(error);
-    }
-}
-
-async function runMissingDataScenario() {
-    try {
-        const response = await api("/v1/inbound/email", {
-            method: "POST",
-            body: {
-                from_address: "missing.context@example.com",
-                to_address: "support@acko.com",
-                subject: "Need help",
-                body_text: "There is an issue with my policy.",
-                message_id: `email-${Date.now()}`,
-                customer_id_hint: "CUST-DEMO-TRIAGE"
-            }
-        });
-
-        const ticketId = response.data.ticket_number;
-        await api(`/v1/tickets/${ticketId}`, {
-            method: "PATCH",
-            body: {
-                issue_type: "policy",
-                lob: "motor",
-                policy_id: "POL-TRIAGE-445",
-                status: "ASSIGNED"
-            }
-        });
-
-        pushEvent("Iterative routing demo", `${ticketId} moved from triage after customer data arrived.`);
-        await refreshBoard(ticketId);
-    } catch (error) {
-        handleError(error);
-    }
-}
-
 async function api(path, options = {}) {
     const response = await fetch(path, {
         method: options.method || "GET",
@@ -723,10 +606,9 @@ function handleError(error) {
     pushEvent("Action failed", error.message || "Something went wrong.");
 }
 
-function setCustomerId(customerId) {
-    state.customerId = customerId || state.customerId;
-    localStorage.setItem(STORAGE_KEYS.customerId, state.customerId);
-    syncCustomerIdentity();
+async function loadSession() {
+    const response = await api("/v1/me");
+    state.user = response.data;
 }
 
 function persistTicketId(ticketId) {
@@ -734,8 +616,18 @@ function persistTicketId(ticketId) {
     localStorage.setItem(STORAGE_KEYS.ticketId, ticketId);
 }
 
-function syncCustomerIdentity() {
-    text("customerIdentity", state.customerId);
+function syncUserIdentity() {
+    if (!state.user) {
+        return;
+    }
+    text("customerIdentity", state.user.name || state.user.email);
+    text("customerIdentityLabel", state.user.email);
+    text("agentIdentity", state.user.agent
+        ? `Signed in as ${state.user.name || state.user.email}`
+        : state.user.email);
+    setFormValue("#emailForm [name='fromAddress']", state.user.email);
+    setFormValue("#customerComposeForm [name='senderIdentifier']", defaultCustomerSenderIdentifier());
+    setFormValue("#replyForm [name='senderIdentifier']", state.user.email);
 }
 
 function el(id) {
@@ -774,6 +666,10 @@ function pruneEmpty(payload) {
 function blankOrNull(value) {
     const normalized = `${value || ""}`.trim();
     return normalized ? normalized : null;
+}
+
+function defaultCustomerSenderIdentifier() {
+    return state.user ? state.user.email : "";
 }
 
 function channelLabel(channel) {

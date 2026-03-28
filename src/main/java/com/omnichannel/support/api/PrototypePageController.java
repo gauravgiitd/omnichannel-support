@@ -11,6 +11,11 @@ public class PrototypePageController {
         return "forward:/index.html";
     }
 
+    @GetMapping("/login")
+    public String login() {
+        return "forward:/login.html";
+    }
+
     @GetMapping("/customer")
     public String customer() {
         return "forward:/customer.html";

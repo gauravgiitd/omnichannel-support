@@ -19,6 +19,7 @@
         <div class="hero-actions">
             <button type="button" class="ghost-button" id="refreshBoard">Refresh board</button>
             <a class="route-link" href="/customer">Switch to Customer UI</a>
+            <a class="route-link" href="/logout">Sign out</a>
         </div>
     </header>
 
@@ -28,7 +29,7 @@
                 <p class="eyebrow">Agent UI</p>
                 <h2>Queue board and ticket chat</h2>
             </div>
-            <span class="small-note">One ticket. One conversation. One document layer.</span>
+            <span class="small-note" id="agentIdentity">Signed in with Google</span>
         </div>
 
         <div class="subgrid">
@@ -88,7 +89,7 @@
                                     </label>
                                     <label>
                                         Agent identifier
-                                        <input name="senderIdentifier" type="text" value="aditi.sharma@acko.com">
+                                        <input name="senderIdentifier" type="text" value="">
                                     </label>
                                 </div>
                                 <label>
