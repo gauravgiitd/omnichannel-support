@@ -394,14 +394,14 @@ function renderChatThreadInElement(container, messages, customerView) {
         return;
     }
     if (!messages.length) {
-        container.className = "chat-thread empty-state";
+        container.className = `chat-thread ${customerView ? "customer-view" : "agent-view"} empty-state`;
         container.textContent = customerView
             ? "No support ticket loaded in the app yet."
             : "Select a ticket to load the full conversation.";
         return;
     }
 
-    container.className = "chat-thread";
+    container.className = `chat-thread ${customerView ? "customer-view" : "agent-view"}`;
     container.innerHTML = "";
     messages.forEach((message) => container.appendChild(buildMessageNode(message, customerView)));
 }
