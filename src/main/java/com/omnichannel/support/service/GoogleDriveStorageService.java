@@ -15,6 +15,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -93,6 +94,107 @@ public class GoogleDriveStorageService {
             throw new IOException("Drive download failed: " + response.statusCode());
         }
         return response.body();
+    }
+
+    public String ensureCustomerFolder(String customerId) throws IOException, InterruptedException {
+        String rootFolderId = driveStorageProperties.getFolderId();
+        String query =
+                "mimeType='application/vnd.google-apps.folder' and trashed=false and name="
+                        + objectMapper.writeValueAsString(customerId);
+        if (hasText(rootFolderId)) {
+            query += " and '" + rootFolderId + "' in parents";
+        }
+
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("https://www.googleapis.com/drive/v3/files?q="
+                                + urlEncode(query)
+                                + "&fields=files(id,name)&pageSize=1"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + accessToken())
+                .GET()
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("Drive folder lookup failed: " + response.statusCode() + " " + response.body());
+        }
+        JsonNode files = objectMapper.readTree(response.body()).path("files");
+        if (files.isArray() && !files.isEmpty()) {
+            return files.get(0).path("id").asText();
+        }
+
+        StringBuilder metadata = new StringBuilder();
+        metadata.append("{\"name\":").append(objectMapper.writeValueAsString(customerId));
+        metadata.append(",\"mimeType\":\"application/vnd.google-apps.folder\"");
+        if (hasText(rootFolderId)) {
+            metadata.append(",\"parents\":[").append(objectMapper.writeValueAsString(rootFolderId)).append("]");
+        }
+        metadata.append("}");
+
+        HttpRequest createRequest = HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files?fields=id,name"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + accessToken())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(metadata.toString()))
+                .build();
+        HttpResponse<String> createResponse = httpClient.send(createRequest, HttpResponse.BodyHandlers.ofString());
+        if (createResponse.statusCode() < 200 || createResponse.statusCode() >= 300) {
+            throw new IOException("Drive folder creation failed: " + createResponse.statusCode() + " " + createResponse.body());
+        }
+        return objectMapper.readTree(createResponse.body()).path("id").asText();
+    }
+
+    public void moveToFolder(String fileId, String folderId) throws IOException, InterruptedException {
+        List<String> existingParents = listParents(fileId);
+        StringBuilder url = new StringBuilder("https://www.googleapis.com/drive/v3/files/")
+                .append(urlEncode(fileId))
+                .append("?addParents=")
+                .append(urlEncode(folderId))
+                .append("&fields=id,parents");
+        if (!existingParents.isEmpty()) {
+            url.append("&removeParents=").append(urlEncode(String.join(",", existingParents)));
+        }
+
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url.toString()))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + accessToken())
+                .header("Content-Type", "application/json")
+                .method("PATCH", HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("Drive move failed: " + response.statusCode() + " " + response.body());
+        }
+    }
+
+    public void deleteFile(String fileId) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("https://www.googleapis.com/drive/v3/files/" + urlEncode(fileId)))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + accessToken())
+                .DELETE()
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 204 && response.statusCode() != 404) {
+            throw new IOException("Drive delete failed: " + response.statusCode() + " " + response.body());
+        }
+    }
+
+    private List<String> listParents(String fileId) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("https://www.googleapis.com/drive/v3/files/" + urlEncode(fileId) + "?fields=parents"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + accessToken())
+                .GET()
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("Drive parent lookup failed: " + response.statusCode() + " " + response.body());
+        }
+        List<String> parents = new ArrayList<>();
+        for (JsonNode parent : objectMapper.readTree(response.body()).path("parents")) {
+            parents.add(parent.asText());
+        }
+        return parents;
     }
 
     private String accessToken() throws IOException {

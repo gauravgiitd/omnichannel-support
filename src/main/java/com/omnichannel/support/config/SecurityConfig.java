@@ -1,6 +1,7 @@
 package com.omnichannel.support.config;
 
 import com.omnichannel.support.security.AgentAccessService;
+import com.omnichannel.support.security.AdminAccessService;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     private final AgentAccessService agentAccessService;
+    private final AdminAccessService adminAccessService;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -37,10 +39,12 @@ public class SecurityConfig {
                                 "/app.js",
                                 "/oauth2/**")
                         .permitAll()
+                        .requestMatchers("/admin", "/admin.html", "/v1/admin/**")
+                        .hasRole("ADMIN")
                         .requestMatchers("/agent", "/v1/tickets", "/v1/tickets/merge")
-                        .hasRole("AGENT")
+                        .hasAnyRole("AGENT", "ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.PATCH, "/v1/tickets/**")
-                        .hasRole("AGENT")
+                        .hasAnyRole("AGENT", "ADMIN")
                         .requestMatchers("/customer", "/v1/me/**", "/v1/customers/**", "/v1/inbound/**")
                         .authenticated()
                         .requestMatchers("/v1/tickets/**")
@@ -64,6 +68,9 @@ public class SecurityConfig {
             authorities.add(new SimpleGrantedAuthority("ROLE_CUSTOMER"));
             if (agentAccessService.isAllowedAgent(user.getEmail())) {
                 authorities.add(new SimpleGrantedAuthority("ROLE_AGENT"));
+            }
+            if (adminAccessService.isAllowedAdmin(user.getEmail())) {
+                authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
             }
             return new DefaultOidcUser(authorities, user.getIdToken(), user.getUserInfo(), "email");
         };

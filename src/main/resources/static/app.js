@@ -51,6 +51,7 @@ function setupTabs() {
 function bindControls() {
     bindClick("refreshBoard", () => refreshBoard(state.selectedTicketId));
     bindClick("toggleStartSupport", toggleStartSupport);
+    bindClick("refreshAdmin", refreshAdminDashboard);
 }
 
 function bindForms() {
@@ -262,6 +263,21 @@ function bindForms() {
         pushEvent("Customer continued existing ticket", `A new customer update was added to ${state.selectedTicketId}.`);
         await refreshBoard(state.selectedTicketId);
     });
+
+    bindSubmit("adminCleanupForm", async (event) => {
+        const data = new FormData(event.currentTarget);
+        const response = await api("/v1/admin/cleanup", {
+            method: "POST",
+            body: {
+                confirmation: data.get("confirmation")
+            }
+        });
+        text(
+            "adminCleanupResult",
+            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders.`
+        );
+        await refreshAdminDashboard();
+    });
 }
 
 async function refreshBoard(preferredTicketId) {
@@ -284,6 +300,14 @@ async function refreshBoard(preferredTicketId) {
     } else {
         clearWorkspace();
     }
+}
+
+async function refreshAdminDashboard() {
+    if (state.view !== "admin") {
+        return;
+    }
+    const response = await api("/v1/admin/summary");
+    renderAdminMetrics(response.data);
 }
 
 function findRelevantTicketId() {
@@ -322,6 +346,28 @@ function renderMetrics() {
         { label: "Customers", value: new Set(state.tickets.map((ticket) => ticket.customer_id)).size, copy: "Customers represented" }
     ];
 
+    metricsEl.innerHTML = metrics.map((metric) => `
+        <article class="metric-card">
+            <span class="eyebrow">${metric.label}</span>
+            <strong>${metric.value}</strong>
+            <p>${metric.copy}</p>
+        </article>
+    `).join("");
+}
+
+function renderAdminMetrics(summary) {
+    const metricsEl = el("adminMetrics");
+    if (!metricsEl || !summary) {
+        return;
+    }
+    const metrics = [
+        { label: "Tickets", value: summary.tickets, copy: "Total tickets in database" },
+        { label: "Documents", value: summary.documents, copy: "Stored ticket documents" },
+        { label: "Messages", value: summary.messages, copy: "Conversation messages" },
+        { label: "Identity links", value: summary.identity_links, copy: "Customer identifiers" },
+        { label: "Audit logs", value: summary.audit_logs, copy: "Recorded audit events" },
+        { label: "Merges", value: summary.merges, copy: "Ticket merge mappings" }
+    ];
     metricsEl.innerHTML = metrics.map((metric) => `
         <article class="metric-card">
             <span class="eyebrow">${metric.label}</span>
@@ -677,6 +723,9 @@ function syncUserIdentity() {
     text("customerIdentity", state.user.name || state.user.email);
     text("customerIdentityLabel", state.user.email);
     text("agentIdentity", state.user.agent
+        ? `Signed in as ${state.user.name || state.user.email}`
+        : state.user.email);
+    text("adminIdentity", state.user.roles && state.user.roles.includes("ROLE_ADMIN")
         ? `Signed in as ${state.user.name || state.user.email}`
         : state.user.email);
     setFormValue("#emailForm [name='fromAddress']", state.user.email);

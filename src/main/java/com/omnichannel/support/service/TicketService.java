@@ -243,7 +243,7 @@ public class TicketService {
                 request.senderType(),
                 request.senderIdentifier(),
                 documentMessageBody(request),
-                List.of(request.fileUrl()),
+                List.of(doc.fileUrl()),
                 null,
                 messageMeta);
 

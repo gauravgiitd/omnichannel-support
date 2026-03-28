@@ -8,9 +8,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AuthProperties {
 
     private final Agent agent = new Agent();
+    private final Admin admin = new Admin();
 
     public Agent getAgent() {
         return agent;
+    }
+
+    public Admin getAdmin() {
+        return admin;
     }
 
     public static class Agent {
@@ -49,6 +54,18 @@ public class AuthProperties {
 
         public void setServiceAccountJsonBase64(String serviceAccountJsonBase64) {
             this.serviceAccountJsonBase64 = serviceAccountJsonBase64;
+        }
+    }
+
+    public static class Admin {
+        private List<String> allowedEmails = new ArrayList<>();
+
+        public List<String> getAllowedEmails() {
+            return allowedEmails;
+        }
+
+        public void setAllowedEmails(List<String> allowedEmails) {
+            this.allowedEmails = allowedEmails;
         }
     }
 }

@@ -25,4 +25,9 @@ public class PrototypePageController {
     public String agent() {
         return "forward:/agent.html";
     }
+
+    @GetMapping("/admin")
+    public String admin() {
+        return "forward:/admin.html";
+    }
 }

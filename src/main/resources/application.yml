@@ -46,6 +46,8 @@ support:
       allowed-google-groups: ${AGENT_ALLOWED_GOOGLE_GROUPS:}
       workspace-admin-email: ${GOOGLE_WORKSPACE_ADMIN_EMAIL:}
       service-account-json-base64: ${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64:}
+    admin:
+      allowed-emails: ${ADMIN_ALLOWED_EMAILS:}
   gmail-polling:
     enabled: ${GMAIL_POLLING_ENABLED:false}
     fixed-delay-ms: ${GMAIL_POLLING_FIXED_DELAY_MS:30000}

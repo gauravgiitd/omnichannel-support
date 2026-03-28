@@ -24,6 +24,7 @@ public class DocumentService {
     private final TicketDocumentRepository ticketDocumentRepository;
     private final ObjectMapper objectMapper;
     private final AuditService auditService;
+    private final GoogleDriveStorageService googleDriveStorageService;
 
     @Transactional(readOnly = true)
     public List<DocumentDto> listByTicket(Ticket ticket) {
@@ -42,6 +43,9 @@ public class DocumentService {
             String claimId,
             String policyId,
             Map<String, Object> metadata) {
+        Map<String, Object> resolvedMetadata = metadata != null ? new HashMap<>(metadata) : new HashMap<>();
+        moveDriveFileToCustomerFolder(customerId, resolvedMetadata);
+
         TicketDocument doc = new TicketDocument();
         String publicId = UUID.randomUUID().toString();
         doc.setPublicId(publicId);
@@ -50,9 +54,9 @@ public class DocumentService {
         doc.setClaimId(blankToNull(claimId));
         doc.setPolicyId(blankToNull(policyId));
         doc.setDocumentType(documentType != null && !documentType.isBlank() ? documentType : "other");
-        doc.setFileUrl(resolveStoredFileUrl(publicId, fileUrl, metadata));
+        doc.setFileUrl(resolveStoredFileUrl(publicId, fileUrl, resolvedMetadata));
         doc.setSourceChannel(sourceChannel);
-        doc.setMetadataJson(toJson(metadata));
+        doc.setMetadataJson(toJson(resolvedMetadata));
         TicketDocument saved = ticketDocumentRepository.save(doc);
 
         auditService.record(
@@ -66,6 +70,21 @@ public class DocumentService {
                         "channel", sourceChannel.name()));
 
         return toDto(saved);
+    }
+
+    private void moveDriveFileToCustomerFolder(String customerId, Map<String, Object> metadata) {
+        Object driveFileId = metadata.get("drive_file_id");
+        if (driveFileId == null || driveFileId.toString().isBlank() || !googleDriveStorageService.isConfigured()) {
+            return;
+        }
+        try {
+            String folderId = googleDriveStorageService.ensureCustomerFolder(customerId);
+            googleDriveStorageService.moveToFolder(driveFileId.toString(), folderId);
+            metadata.put("drive_folder_id", folderId);
+            metadata.put("drive_customer_folder", customerId);
+        } catch (Exception ex) {
+            metadata.put("drive_folder_move_error", ex.getMessage() != null ? ex.getMessage() : "unknown");
+        }
     }
 
     @Transactional(readOnly = true)

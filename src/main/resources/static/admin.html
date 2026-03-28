@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administrator Workspace</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body data-view="admin">
+<div class="page-shell">
+    <header class="hero">
+        <div>
+            <p class="eyebrow">Administrator Experience</p>
+            <p class="hero-copy">
+                Administrators can review system totals and clean up all prototype data from the database and Google Drive.
+            </p>
+        </div>
+        <div class="hero-actions">
+            <a class="route-link" href="/customer">Customer UI</a>
+            <a class="route-link" href="/agent">Agent UI</a>
+            <a class="route-link" href="/logout">Sign out</a>
+        </div>
+    </header>
+
+    <section class="surface agent-surface">
+        <div class="surface-head">
+            <div>
+                <p class="eyebrow">Admin UI</p>
+                <h2>System cleanup and controls</h2>
+            </div>
+            <span class="small-note" id="adminIdentity">Signed in with Google</span>
+        </div>
+
+        <div class="subgrid">
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Overview</p>
+                        <h3>Current system totals</h3>
+                    </div>
+                    <button type="button" class="ghost-button" id="refreshAdmin">Refresh</button>
+                </div>
+                <div class="metric-grid" id="adminMetrics"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Danger Zone</p>
+                        <h3>Delete all prototype data</h3>
+                    </div>
+                </div>
+                <form id="adminCleanupForm" class="stack-form">
+                    <label>
+                        Type `DELETE ALL DATA` to confirm
+                        <input name="confirmation" type="text" placeholder="DELETE ALL DATA" required>
+                    </label>
+                    <p class="small-note">
+                        This removes customers, tickets, messages, documents, audit records, merge data, identity links,
+                        and Drive-backed files/folders created by the prototype.
+                    </p>
+                    <button type="submit" class="danger-button">Delete all data</button>
+                </form>
+                <div id="adminCleanupResult" class="small-note"></div>
+            </section>
+        </div>
+    </section>
+</div>
+
+<script src="/app.js" defer></script>
+</body>
+</html>
