@@ -11,6 +11,7 @@ import com.omnichannel.support.dto.InboundWhatsAppRequest;
 import com.omnichannel.support.dto.MessageDto;
 import com.omnichannel.support.dto.TicketDto;
 import com.omnichannel.support.error.ValidationException;
+import com.omnichannel.support.repo.MessageRepository;
 import com.omnichannel.support.repo.TicketRepository;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class InboundWhatsAppService {
 
     private final IdentityResolutionService identityResolutionService;
+    private final MessageRepository messageRepository;
     private final TicketRepository ticketRepository;
     private final TicketResolutionService ticketResolutionService;
     private final ConversationService conversationService;
@@ -112,6 +114,15 @@ public class InboundWhatsAppService {
     }
 
     private Optional<Ticket> resolveTargetTicket(InboundWhatsAppRequest request, String customerId) {
+        if (request.replyToWaMessageId() != null && !request.replyToWaMessageId().isBlank()) {
+            Optional<Ticket> fromReplyContext = messageRepository
+                    .findByExternalThreadRef(request.replyToWaMessageId().trim())
+                    .map(com.omnichannel.support.domain.Message::getTicket)
+                    .map(ticketResolutionService::resolveCanonical);
+            if (fromReplyContext.isPresent()) {
+                return fromReplyContext;
+            }
+        }
         if (request.ticketNumberHint() != null && !request.ticketNumberHint().isBlank()) {
             return ticketRepository
                     .findByTicketNumber(request.ticketNumberHint().trim().toUpperCase())

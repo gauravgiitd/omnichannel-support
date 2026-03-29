@@ -57,6 +57,7 @@ public class InboundChannelController {
                 request.waMessageId(),
                 request.fromE164Phone(),
                 request.bodyText(),
+                request.replyToWaMessageId(),
                 user.customerId(),
                 request.ticketNumberHint(),
                 request.issueTypeHint(),

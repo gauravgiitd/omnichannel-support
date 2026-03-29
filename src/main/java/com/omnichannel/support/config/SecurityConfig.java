@@ -37,6 +37,7 @@ public class SecurityConfig {
                                 "/favicon.ico",
                                 "/app.css",
                                 "/app.js",
+                                "/webhooks/meta/whatsapp",
                                 "/oauth2/**")
                         .permitAll()
                         .requestMatchers("/admin", "/admin.html", "/v1/admin/**")

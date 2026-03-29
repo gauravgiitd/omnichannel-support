@@ -67,6 +67,10 @@ support:
     client-id: ${DRIVE_STORAGE_CLIENT_ID:}
     client-secret: ${DRIVE_STORAGE_CLIENT_SECRET:}
     refresh-token: ${DRIVE_STORAGE_REFRESH_TOKEN:}
+  whatsapp-cloud-api:
+    enabled: ${WHATSAPP_CLOUD_API_ENABLED:false}
+    verify-token: ${WHATSAPP_CLOUD_API_VERIFY_TOKEN:}
+    access-token: ${WHATSAPP_CLOUD_API_ACCESS_TOKEN:}
   outbound-email:
     from-address: support@company.example
     from-display-name: Company Support

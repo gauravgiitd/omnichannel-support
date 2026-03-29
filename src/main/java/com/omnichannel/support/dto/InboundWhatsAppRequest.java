@@ -11,6 +11,7 @@ public record InboundWhatsAppRequest(
         @NotBlank @Size(max = 32) String waMessageId,
         @NotBlank @Size(max = 32) String fromE164Phone,
         @NotBlank @Size(max = 20_000) String bodyText,
+        @Size(max = 32) String replyToWaMessageId,
         @Size(max = 64) String customerIdHint,
         @Size(max = 64) String ticketNumberHint,
         @Size(max = 128) String issueTypeHint,
