@@ -77,6 +77,24 @@
             <section class="panel">
                 <div class="panel-head">
                     <div>
+                        <p class="eyebrow">Routing Debug</p>
+                        <h3>Inspect ticket delivery routing</h3>
+                    </div>
+                </div>
+                <form id="ticketDeliveryDebugForm" class="stack-form">
+                    <label>
+                        Ticket ID
+                        <input name="ticketId" type="text" placeholder="TKT-123456" required>
+                    </label>
+                    <button type="submit">Inspect ticket routing</button>
+                </form>
+                <div id="ticketDeliveryDebugSummary" class="small-note"></div>
+                <pre id="ticketDeliveryDebugResult" class="small-note" style="white-space: pre-wrap;">No ticket inspected yet.</pre>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
                         <p class="eyebrow">Danger Zone</p>
                         <h3>Delete one customer</h3>
                     </div>

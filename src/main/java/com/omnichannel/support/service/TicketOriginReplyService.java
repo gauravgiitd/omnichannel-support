@@ -4,15 +4,20 @@ import com.omnichannel.support.config.SupportPlatformProperties;
 import com.omnichannel.support.domain.ChannelType;
 import com.omnichannel.support.domain.CustomerIdentityLink;
 import com.omnichannel.support.domain.IdentifierType;
+import com.omnichannel.support.domain.Message;
+import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Ticket;
 import com.omnichannel.support.dto.DocumentDto;
 import com.omnichannel.support.error.ValidationException;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
+import com.omnichannel.support.repo.MessageRepository;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -26,10 +31,46 @@ public class TicketOriginReplyService {
 
     private final SupportPlatformProperties properties;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
+    private final MessageRepository messageRepository;
     private final ObjectProvider<JavaMailSender> mailSenderProvider;
     private final MetaWhatsAppCloudApiClient metaWhatsAppCloudApiClient;
     private final GoogleDriveStorageService googleDriveStorageService;
     private final AuditService auditService;
+
+    public DeliveryDebug debugTicketRouting(Ticket ticket) {
+        List<CustomerIdentityLink> identityLinks = customerIdentityLinkRepository.findByCustomerId(ticket.getCustomerId());
+        List<Message> timeline = messageRepository.findByTicketOrderByCreatedAtAsc(ticket);
+
+        Optional<String> threadEmail = findThreadRecipient(ticket, ChannelType.EMAIL);
+        Optional<String> threadWhatsApp = findThreadRecipient(ticket, ChannelType.WHATSAPP);
+        Optional<String> customerEmail = findIdentifier(ticket.getCustomerId(), IdentifierType.EMAIL);
+        Optional<String> customerPhone = findIdentifier(ticket.getCustomerId(), IdentifierType.PHONE);
+        Optional<String> resolvedRecipient = resolveOriginRecipient(ticket, ticket.getSourceChannel());
+
+        return new DeliveryDebug(
+                ticket.getTicketNumber(),
+                ticket.getCustomerId(),
+                ticket.getSourceChannel(),
+                identityLinks.stream()
+                        .map(link -> new IdentityLinkDebug(
+                                link.getIdentifierType().name(),
+                                link.getIdentifierValue(),
+                                link.getCreatedAt()))
+                        .collect(Collectors.toList()),
+                timeline.stream()
+                        .map(message -> new MessageRouteDebug(
+                                message.getPublicId(),
+                                message.getChannel().name(),
+                                message.getSenderType().name(),
+                                message.getSenderIdentifier(),
+                                message.getCreatedAt()))
+                        .collect(Collectors.toList()),
+                threadEmail.orElse(null),
+                threadWhatsApp.orElse(null),
+                customerEmail.orElse(null),
+                customerPhone.orElse(null),
+                resolvedRecipient.orElse(null));
+    }
 
     public OutboundDeliveryResult deliverAgentReply(Ticket ticket, String agentEmail, String body) {
         return switch (ticket.getSourceChannel()) {
@@ -40,7 +81,7 @@ public class TicketOriginReplyService {
     }
 
     private OutboundDeliveryResult sendEmailReply(Ticket ticket, String agentEmail, String body) {
-        String recipient = findIdentifier(ticket.getCustomerId(), IdentifierType.EMAIL)
+        String recipient = resolveOriginRecipient(ticket, ChannelType.EMAIL)
                 .orElseThrow(() -> new ValidationException("customer email not found for ticket origin"));
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
         if (mailSender == null) {
@@ -89,7 +130,7 @@ public class TicketOriginReplyService {
     }
 
     private OutboundDeliveryResult sendWhatsAppReply(Ticket ticket, String agentEmail, String body) {
-        String recipient = findIdentifier(ticket.getCustomerId(), IdentifierType.PHONE)
+        String recipient = resolveOriginRecipient(ticket, ChannelType.WHATSAPP)
                 .orElseThrow(() -> new ValidationException("customer phone not found for ticket origin"));
         if (!metaWhatsAppCloudApiClient.canSendMessages()) {
             throw new ValidationException("WhatsApp Cloud API outbound messaging is not configured");
@@ -130,6 +171,36 @@ public class TicketOriginReplyService {
         return normalizedBase + "/customer?ticket=" + ticketNumber;
     }
 
+    private Optional<String> resolveOriginRecipient(Ticket ticket, ChannelType channelType) {
+        Optional<String> threadRecipient = findThreadRecipient(ticket, channelType);
+        if (threadRecipient.isPresent()) {
+            return threadRecipient;
+        }
+        return switch (channelType) {
+            case EMAIL -> findIdentifier(ticket.getCustomerId(), IdentifierType.EMAIL);
+            case WHATSAPP -> findIdentifier(ticket.getCustomerId(), IdentifierType.PHONE);
+            case UI -> Optional.empty();
+        };
+    }
+
+    private Optional<String> findThreadRecipient(Ticket ticket, ChannelType channelType) {
+        List<Message> timeline = messageRepository.findByTicketOrderByCreatedAtAsc(ticket);
+        for (int index = timeline.size() - 1; index >= 0; index -= 1) {
+            Message message = timeline.get(index);
+            if (message.getSenderType() != SenderType.CUSTOMER) {
+                continue;
+            }
+            if (message.getChannel() != channelType) {
+                continue;
+            }
+            String sender = message.getSenderIdentifier();
+            if (sender != null && !sender.isBlank()) {
+                return Optional.of(sender);
+            }
+        }
+        return Optional.empty();
+    }
+
     private Optional<String> findIdentifier(String customerId, IdentifierType type) {
         return customerIdentityLinkRepository
                 .findFirstByCustomerIdAndIdentifierTypeOrderByCreatedAtAsc(customerId, type)
@@ -138,7 +209,7 @@ public class TicketOriginReplyService {
 
     private OutboundDeliveryResult sendEmailAttachment(
             Ticket ticket, String agentEmail, DocumentDto document, String messageBody) {
-        String recipient = findIdentifier(ticket.getCustomerId(), IdentifierType.EMAIL)
+        String recipient = resolveOriginRecipient(ticket, ChannelType.EMAIL)
                 .orElseThrow(() -> new ValidationException("customer email not found for ticket origin"));
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
         if (mailSender == null) {
@@ -186,7 +257,7 @@ public class TicketOriginReplyService {
 
     private OutboundDeliveryResult sendWhatsAppAttachment(
             Ticket ticket, String agentEmail, DocumentDto document, String messageBody) {
-        String recipient = findIdentifier(ticket.getCustomerId(), IdentifierType.PHONE)
+        String recipient = resolveOriginRecipient(ticket, ChannelType.WHATSAPP)
                 .orElseThrow(() -> new ValidationException("customer phone not found for ticket origin"));
         if (!metaWhatsAppCloudApiClient.canSendMessages()) {
             throw new ValidationException("WhatsApp Cloud API outbound messaging is not configured");
@@ -271,4 +342,21 @@ public class TicketOriginReplyService {
 
     public record OutboundDeliveryResult(
             ChannelType channel, String recipient, String externalThreadRef, Map<String, Object> metadata) {}
+
+    public record DeliveryDebug(
+            String ticketId,
+            String customerId,
+            ChannelType sourceChannel,
+            List<IdentityLinkDebug> identityLinks,
+            List<MessageRouteDebug> timeline,
+            String latestThreadEmailRecipient,
+            String latestThreadWhatsAppRecipient,
+            String customerEmailFallback,
+            String customerPhoneFallback,
+            String resolvedOutboundRecipient) {}
+
+    public record IdentityLinkDebug(String identifierType, String identifierValue, java.time.Instant createdAt) {}
+
+    public record MessageRouteDebug(
+            String messageId, String channel, String senderType, String senderIdentifier, java.time.Instant createdAt) {}
 }

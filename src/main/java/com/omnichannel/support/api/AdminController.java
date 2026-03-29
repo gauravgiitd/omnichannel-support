@@ -5,6 +5,8 @@ import com.omnichannel.support.dto.CustomerContactMappingDto;
 import com.omnichannel.support.dto.UpsertCustomerContactMappingRequest;
 import com.omnichannel.support.service.AdminCleanupService;
 import com.omnichannel.support.service.CustomerContactMappingService;
+import com.omnichannel.support.service.TicketOriginReplyService;
+import com.omnichannel.support.service.TicketService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -26,6 +28,8 @@ public class AdminController {
 
     private final AdminCleanupService adminCleanupService;
     private final CustomerContactMappingService customerContactMappingService;
+    private final TicketService ticketService;
+    private final TicketOriginReplyService ticketOriginReplyService;
 
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<AdminCleanupService.AdminSummary>> summary() {
@@ -35,6 +39,13 @@ public class AdminController {
     @GetMapping("/contact-mappings")
     public ResponseEntity<ApiResponse<List<CustomerContactMappingDto>>> contactMappings() {
         return ResponseEntity.ok(ApiResponse.success(customerContactMappingService.listAll()));
+    }
+
+    @GetMapping("/tickets/{ticketId}/delivery-debug")
+    public ResponseEntity<ApiResponse<TicketOriginReplyService.DeliveryDebug>> ticketDeliveryDebug(
+            @PathVariable("ticketId") String ticketId) {
+        return ResponseEntity.ok(ApiResponse.success(
+                ticketOriginReplyService.debugTicketRouting(ticketService.loadCanonicalTicket(ticketId))));
     }
 
     @PostMapping("/contact-mappings")

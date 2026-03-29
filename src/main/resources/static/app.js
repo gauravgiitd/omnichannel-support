@@ -216,6 +216,18 @@ function bindForms() {
         resetContactMappingForm();
         await refreshAdminDashboard();
     });
+
+    bindSubmit("ticketDeliveryDebugForm", async (event) => {
+        const data = new FormData(event.currentTarget);
+        const ticketId = `${data.get("ticketId") || ""}`.trim();
+        const response = await api(`/v1/admin/tickets/${encodeURIComponent(ticketId)}/delivery-debug`);
+        const debug = response.data;
+        text(
+            "ticketDeliveryDebugSummary",
+            `Ticket ${debug.ticket_id} belongs to ${debug.customer_id}, started on ${debug.source_channel}, and will currently reply to ${debug.resolved_outbound_recipient || "no resolved recipient"}.`
+        );
+        text("ticketDeliveryDebugResult", JSON.stringify(debug, null, 2));
+    });
 }
 
 async function refreshBoard(preferredTicketId) {
