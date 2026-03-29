@@ -108,7 +108,7 @@ function bindForms() {
         const body = data.get("body");
         const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
 
-        await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
+        const messageResponse = await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
             method: "POST",
             body: {
                 channel: state.currentTicket ? state.currentTicket.source_channel : "UI",
@@ -141,7 +141,16 @@ function bindForms() {
         }
 
         const origin = state.currentTicket ? channelLabel(state.currentTicket.source_channel) : "APP";
-        pushEvent("Agent responded", `The reply was delivered to ${origin} and recorded in the shared ticket thread.`);
+        const deliveryStatus = messageResponse?.data?.metadata?.delivery_status;
+        const deliveryError = messageResponse?.data?.metadata?.delivery_error;
+        if (deliveryStatus === "failed") {
+            pushEvent(
+                "Agent response recorded",
+                `The reply was added to the ticket thread, but delivery to ${origin} failed${deliveryError ? `: ${deliveryError}` : "."}`
+            );
+        } else {
+            pushEvent("Agent responded", `The reply was delivered to ${origin} and recorded in the shared ticket thread.`);
+        }
         await refreshBoard(state.selectedTicketId);
     });
 

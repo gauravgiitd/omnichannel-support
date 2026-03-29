@@ -12,6 +12,7 @@ import com.omnichannel.support.dto.PostMessageRequest;
 import com.omnichannel.support.dto.RegisterDocumentRequest;
 import com.omnichannel.support.dto.TicketDto;
 import com.omnichannel.support.error.NotFoundException;
+import com.omnichannel.support.error.ValidationException;
 import com.omnichannel.support.repo.TicketMergeMapRepository;
 import com.omnichannel.support.repo.TicketRepository;
 import java.util.EnumSet;
@@ -190,26 +191,38 @@ public class TicketService {
     @Transactional
     public MessageDto postMessage(String ticketNumber, PostMessageRequest request) {
         Ticket ticket = loadCanonicalTicket(ticketNumber);
-        PostMessageRequest effectiveRequest = request;
-        if (request.senderType() == SenderType.AGENT) {
-            TicketOriginReplyService.OutboundDeliveryResult delivery =
-                    ticketOriginReplyService.deliverAgentReply(ticket, request.senderIdentifier(), request.body());
-            Map<String, Object> metadata = new HashMap<>();
-            if (request.metadata() != null) {
-                metadata.putAll(request.metadata());
-            }
-            if (delivery.metadata() != null) {
-                metadata.putAll(delivery.metadata());
-            }
-            effectiveRequest = new PostMessageRequest(
-                    delivery.channel(),
-                    request.senderType(),
-                    request.senderIdentifier(),
-                    request.body(),
-                    request.attachmentUrls(),
-                    delivery.externalThreadRef(),
-                    metadata);
+        Map<String, Object> metadata = new HashMap<>();
+        if (request.metadata() != null) {
+            metadata.putAll(request.metadata());
         }
+        ChannelType channel = request.channel();
+        String externalThreadRef = request.externalThreadRef();
+        if (request.senderType() == SenderType.AGENT) {
+            try {
+                TicketOriginReplyService.OutboundDeliveryResult delivery =
+                        ticketOriginReplyService.deliverAgentReply(ticket, request.senderIdentifier(), request.body());
+                if (delivery.metadata() != null) {
+                    metadata.putAll(delivery.metadata());
+                }
+                if (delivery.channel() != null) {
+                    channel = delivery.channel();
+                }
+                externalThreadRef = delivery.externalThreadRef();
+                metadata.put("delivery_status", "sent");
+            } catch (ValidationException ex) {
+                metadata.put("delivery_status", "failed");
+                metadata.put("delivery_error", ex.getMessage());
+                metadata.put("delivery_channel", ticket.getSourceChannel().name());
+            }
+        }
+        PostMessageRequest effectiveRequest = new PostMessageRequest(
+                channel,
+                request.senderType(),
+                request.senderIdentifier(),
+                request.body(),
+                request.attachmentUrls(),
+                externalThreadRef,
+                metadata);
         MessageDto message =
                 conversationService.appendMessage(
                         ticket,
@@ -257,10 +270,17 @@ public class TicketService {
                         meta);
 
         if (request.senderType() == SenderType.AGENT) {
-            TicketOriginReplyService.OutboundDeliveryResult delivery =
-                    ticketOriginReplyService.deliverAgentDocument(
-                            ticket, request.senderIdentifier(), doc, request.messageBody());
-            meta.putAll(delivery.metadata());
+            try {
+                TicketOriginReplyService.OutboundDeliveryResult delivery =
+                        ticketOriginReplyService.deliverAgentDocument(
+                                ticket, request.senderIdentifier(), doc, request.messageBody());
+                meta.putAll(delivery.metadata());
+                meta.put("delivery_status", "sent");
+            } catch (ValidationException ex) {
+                meta.put("delivery_status", "failed");
+                meta.put("delivery_error", ex.getMessage());
+                meta.put("delivery_channel", ticket.getSourceChannel().name());
+            }
         }
 
         Map<String, Object> messageMeta = new HashMap<>();
