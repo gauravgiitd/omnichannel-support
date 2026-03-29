@@ -7,6 +7,7 @@ import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import java.util.Locale;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,11 +33,16 @@ public class IdentityResolutionService {
             throw new ValidationException("identifier_value is required");
         }
         String normalized = normalize(type, rawValue);
+        ensureLink(customerId, type, normalized);
+    }
+
+    private void ensureLink(String customerId, IdentifierType type, String normalized) {
         Optional<CustomerIdentityLink> existing =
                 linkRepository.findByIdentifierTypeAndIdentifierValue(type, normalized);
         if (existing.isPresent()) {
             if (!existing.get().getCustomerId().equals(customerId)) {
-                throw new ValidationException("identifier already linked to another customer");
+                throw new ValidationException(type.name() + " " + normalized + " is already linked to customer "
+                        + existing.get().getCustomerId());
             }
             return;
         }
@@ -44,7 +50,20 @@ public class IdentityResolutionService {
         link.setCustomerId(customerId);
         link.setIdentifierType(type);
         link.setIdentifierValue(normalized);
-        linkRepository.save(link);
+        try {
+            linkRepository.saveAndFlush(link);
+        } catch (DataIntegrityViolationException ex) {
+            Optional<CustomerIdentityLink> concurrent =
+                    linkRepository.findByIdentifierTypeAndIdentifierValue(type, normalized);
+            if (concurrent.isPresent()) {
+                if (concurrent.get().getCustomerId().equals(customerId)) {
+                    return;
+                }
+                throw new ValidationException(type.name() + " " + normalized + " is already linked to customer "
+                        + concurrent.get().getCustomerId());
+            }
+            throw ex;
+        }
     }
 
     private static String normalize(IdentifierType type, String rawValue) {
