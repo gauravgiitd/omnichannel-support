@@ -101,7 +101,7 @@ public class TicketService {
                                 "assigned_queue",
                                 ticket.getAssignedQueue() != null ? ticket.getAssignedQueue() : ""));
 
-        ticketEmailNotificationService.sendTicketCreatedEmail(ticket);
+        ticketEmailNotificationService.sendTicketCreatedNotifications(ticket);
 
         return toDto(ticket);
     }

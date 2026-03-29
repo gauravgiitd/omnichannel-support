@@ -7,6 +7,7 @@ import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Ticket;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
+import com.omnichannel.support.error.ValidationException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
@@ -26,6 +27,14 @@ public class TicketEmailNotificationService {
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
     private final ConversationService conversationService;
     private final AuditService auditService;
+    private final MetaWhatsAppCloudApiClient metaWhatsAppCloudApiClient;
+
+    public void sendTicketCreatedNotifications(Ticket ticket) {
+        if (ticket.getSourceChannel() == ChannelType.WHATSAPP) {
+            sendTicketCreatedWhatsApp(ticket);
+        }
+        sendTicketCreatedEmail(ticket);
+    }
 
     public void sendTicketCreatedEmail(Ticket ticket) {
         Optional<String> emailOpt = findCustomerEmail(ticket.getCustomerId());
@@ -111,6 +120,74 @@ public class TicketEmailNotificationService {
         }
     }
 
+    public void sendTicketCreatedWhatsApp(Ticket ticket) {
+        Optional<String> phoneOpt = findCustomerPhone(ticket.getCustomerId());
+        if (phoneOpt.isEmpty()) {
+            auditService.record(
+                    "TICKET_WHATSAPP_SKIPPED",
+                    "Ticket",
+                    ticket.getTicketNumber(),
+                    "SYSTEM",
+                    "ticket-whatsapp",
+                    Map.of("reason", "customer phone not found"));
+            return;
+        }
+        if (!metaWhatsAppCloudApiClient.canSendMessages()) {
+            auditService.record(
+                    "TICKET_WHATSAPP_SKIPPED",
+                    "Ticket",
+                    ticket.getTicketNumber(),
+                    "SYSTEM",
+                    "ticket-whatsapp",
+                    Map.of("reason", "whatsapp outbound not configured"));
+            return;
+        }
+
+        String recipient = phoneOpt.get();
+        String ticketUrl = customerTicketUrl(ticket.getTicketNumber());
+        String body = """
+                Your support ticket is now open.
+
+                Ticket number: %s
+
+                Open your ticket here:
+                %s
+
+                You can continue the conversation here on WhatsApp or open the ticket in the customer app using the link above. Either way, we will add everything to the same ticket.
+                """.formatted(ticket.getTicketNumber(), ticketUrl);
+        try {
+            String messageId = metaWhatsAppCloudApiClient.sendTextMessage(recipient, body);
+            conversationService.appendMessage(
+                    ticket,
+                    ChannelType.WHATSAPP,
+                    SenderType.SYSTEM,
+                    properties.systemIdentity() != null ? properties.systemIdentity().agentReplyFromAddress() : "support",
+                    body,
+                    java.util.List.of(),
+                    messageId,
+                    Map.of(
+                            "direction", "outbound_ticket_created_whatsapp",
+                            "recipient", recipient,
+                            "customer_ticket_url", ticketUrl));
+
+            auditService.record(
+                    "TICKET_WHATSAPP_SENT",
+                    "Ticket",
+                    ticket.getTicketNumber(),
+                    "SYSTEM",
+                    "ticket-whatsapp",
+                    Map.of("recipient", recipient, "message_id", messageId != null ? messageId : ""));
+        } catch (Exception ex) {
+            auditService.record(
+                    "TICKET_WHATSAPP_FAILED",
+                    "Ticket",
+                    ticket.getTicketNumber(),
+                    "SYSTEM",
+                    "ticket-whatsapp",
+                    Map.of("recipient", recipient, "error", ex.getMessage() != null ? ex.getMessage() : "unknown"));
+        }
+    }
+
     private String customerTicketUrl(String ticketNumber) {
         String baseUrl = properties.app() != null ? properties.app().baseUrl() : null;
         String normalizedBase = (baseUrl == null || baseUrl.isBlank())
@@ -122,6 +199,12 @@ public class TicketEmailNotificationService {
     private Optional<String> findCustomerEmail(String customerId) {
         return customerIdentityLinkRepository
                 .findFirstByCustomerIdAndIdentifierTypeOrderByCreatedAtAsc(customerId, IdentifierType.EMAIL)
+                .map(CustomerIdentityLink::getIdentifierValue);
+    }
+
+    private Optional<String> findCustomerPhone(String customerId) {
+        return customerIdentityLinkRepository
+                .findFirstByCustomerIdAndIdentifierTypeOrderByCreatedAtAsc(customerId, IdentifierType.PHONE)
                 .map(CustomerIdentityLink::getIdentifierValue);
     }
 
