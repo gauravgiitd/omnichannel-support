@@ -11,6 +11,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +27,10 @@ public class MetaWhatsAppCloudApiClient {
 
     public boolean isConfigured() {
         return hasText(properties.getAccessToken());
+    }
+
+    public boolean canSendMessages() {
+        return isConfigured() && hasText(properties.getPhoneNumberId());
     }
 
     public MediaDescriptor getMediaMetadata(String mediaId) throws IOException, InterruptedException {
@@ -59,8 +64,110 @@ public class MetaWhatsAppCloudApiClient {
         return response.body();
     }
 
+    public String sendTextMessage(String toPhoneNumber, String body) throws IOException, InterruptedException {
+        String normalizedPhone = normalizeRecipient(toPhoneNumber);
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create(GRAPH_BASE_URL + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + properties.getAccessToken())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                        "messaging_product", "whatsapp",
+                        "recipient_type", "individual",
+                        "to", normalizedPhone,
+                        "type", "text",
+                        "text", Map.of("preview_url", false, "body", body)))))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("WhatsApp send message failed: " + response.statusCode() + " " + response.body());
+        }
+        JsonNode json = objectMapper.readTree(response.body());
+        JsonNode messages = json.path("messages");
+        if (messages.isArray() && !messages.isEmpty() && messages.get(0).hasNonNull("id")) {
+            return messages.get(0).path("id").asText();
+        }
+        return null;
+    }
+
+    public String uploadMedia(String fileName, String mimeType, byte[] bytes) throws IOException, InterruptedException {
+        String boundary = "wa-media-" + System.nanoTime();
+        String safeMime = hasText(mimeType) ? mimeType : "application/octet-stream";
+        byte[] prefix = (
+                "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"messaging_product\"\r\n\r\n"
+                        + "whatsapp\r\n"
+                        + "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"file\"; filename=\"" + escapeQuoted(fileName) + "\"\r\n"
+                        + "Content-Type: " + safeMime + "\r\n\r\n")
+                .getBytes(StandardCharsets.UTF_8);
+        byte[] suffix = ("\r\n--" + boundary + "--").getBytes(StandardCharsets.UTF_8);
+        byte[] payload = new byte[prefix.length + bytes.length + suffix.length];
+        System.arraycopy(prefix, 0, payload, 0, prefix.length);
+        System.arraycopy(bytes, 0, payload, prefix.length, bytes.length);
+        System.arraycopy(suffix, 0, payload, prefix.length + bytes.length, suffix.length);
+
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create(GRAPH_BASE_URL + "/" + urlEncode(properties.getPhoneNumberId()) + "/media"))
+                .timeout(Duration.ofSeconds(30))
+                .header("Authorization", "Bearer " + properties.getAccessToken())
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("WhatsApp media upload failed: " + response.statusCode() + " " + response.body());
+        }
+        JsonNode json = objectMapper.readTree(response.body());
+        return json.path("id").asText();
+    }
+
+    public String sendDocumentMessage(String toPhoneNumber, String mediaId, String fileName, String caption)
+            throws IOException, InterruptedException {
+        String normalizedPhone = normalizeRecipient(toPhoneNumber);
+        Map<String, Object> document = new java.util.LinkedHashMap<>();
+        document.put("id", mediaId);
+        if (hasText(fileName)) {
+            document.put("filename", fileName);
+        }
+        if (hasText(caption)) {
+            document.put("caption", caption);
+        }
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create(GRAPH_BASE_URL + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + properties.getAccessToken())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                        "messaging_product", "whatsapp",
+                        "recipient_type", "individual",
+                        "to", normalizedPhone,
+                        "type", "document",
+                        "document", document))))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("WhatsApp send document failed: " + response.statusCode() + " " + response.body());
+        }
+        JsonNode json = objectMapper.readTree(response.body());
+        JsonNode messages = json.path("messages");
+        if (messages.isArray() && !messages.isEmpty() && messages.get(0).hasNonNull("id")) {
+            return messages.get(0).path("id").asText();
+        }
+        return null;
+    }
+
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private static String normalizeRecipient(String value) {
+        String digitsOnly = value == null ? "" : value.replaceAll("[^0-9]", "");
+        return digitsOnly.isBlank() ? value : digitsOnly;
+    }
+
+    private static String escapeQuoted(String value) {
+        return value == null ? "attachment" : value.replace("\"", "");
     }
 
     private static String urlEncode(String value) {

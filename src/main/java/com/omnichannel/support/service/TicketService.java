@@ -47,6 +47,7 @@ public class TicketService {
     private final DocumentService documentService;
     private final RoutingService routingService;
     private final TicketEmailNotificationService ticketEmailNotificationService;
+    private final TicketOriginReplyService ticketOriginReplyService;
 
     @Transactional
     public TicketDto createTicket(CreateTicketRequest request) {
@@ -189,24 +190,44 @@ public class TicketService {
     @Transactional
     public MessageDto postMessage(String ticketNumber, PostMessageRequest request) {
         Ticket ticket = loadCanonicalTicket(ticketNumber);
+        PostMessageRequest effectiveRequest = request;
+        if (request.senderType() == SenderType.AGENT) {
+            TicketOriginReplyService.OutboundDeliveryResult delivery =
+                    ticketOriginReplyService.deliverAgentReply(ticket, request.senderIdentifier(), request.body());
+            Map<String, Object> metadata = new HashMap<>();
+            if (request.metadata() != null) {
+                metadata.putAll(request.metadata());
+            }
+            if (delivery.metadata() != null) {
+                metadata.putAll(delivery.metadata());
+            }
+            effectiveRequest = new PostMessageRequest(
+                    delivery.channel(),
+                    request.senderType(),
+                    request.senderIdentifier(),
+                    request.body(),
+                    request.attachmentUrls(),
+                    delivery.externalThreadRef(),
+                    metadata);
+        }
         MessageDto message =
                 conversationService.appendMessage(
                         ticket,
-                        request.channel(),
-                        request.senderType(),
-                        request.senderIdentifier(),
-                        request.body(),
-                        request.attachmentUrls() != null ? request.attachmentUrls() : List.of(),
-                        request.externalThreadRef(),
-                        request.metadata());
+                        effectiveRequest.channel(),
+                        effectiveRequest.senderType(),
+                        effectiveRequest.senderIdentifier(),
+                        effectiveRequest.body(),
+                        effectiveRequest.attachmentUrls() != null ? effectiveRequest.attachmentUrls() : List.of(),
+                        effectiveRequest.externalThreadRef(),
+                        effectiveRequest.metadata());
 
         auditService.record(
                 "MESSAGE_APPENDED",
                 "Message",
                 message.messageId(),
-                request.senderType().name(),
-                request.senderIdentifier(),
-                java.util.Map.of("ticket", ticket.getTicketNumber(), "channel", request.channel().name()));
+                effectiveRequest.senderType().name(),
+                effectiveRequest.senderIdentifier(),
+                java.util.Map.of("ticket", ticket.getTicketNumber(), "channel", effectiveRequest.channel().name()));
 
         return message;
     }
@@ -235,8 +256,21 @@ public class TicketService {
                         request.policyId(),
                         meta);
 
+        if (request.senderType() == SenderType.AGENT) {
+            TicketOriginReplyService.OutboundDeliveryResult delivery =
+                    ticketOriginReplyService.deliverAgentDocument(
+                            ticket, request.senderIdentifier(), doc, request.messageBody());
+            meta.putAll(delivery.metadata());
+        }
+
         Map<String, Object> messageMeta = new HashMap<>();
         messageMeta.put("attachment_ids", List.of(doc.documentId()));
+        if (meta.get("delivery") != null) {
+            messageMeta.put("delivery", meta.get("delivery"));
+        }
+        if (meta.get("recipient") != null) {
+            messageMeta.put("recipient", meta.get("recipient"));
+        }
         conversationService.appendMessage(
                 ticket,
                 request.channel(),

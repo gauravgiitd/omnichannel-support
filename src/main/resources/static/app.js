@@ -9,6 +9,7 @@ const state = {
     user: null,
     tickets: [],
     customerTickets: [],
+    contactMappings: [],
     selectedTicketId: ticketFromUrl || localStorage.getItem(STORAGE_KEYS.ticketId),
     currentTicket: null,
     messages: [],
@@ -54,6 +55,7 @@ function bindControls() {
     bindClick("refreshBoard", () => refreshBoard(state.selectedTicketId));
     bindClick("toggleStartSupport", toggleStartSupport);
     bindClick("refreshAdmin", refreshAdminDashboard);
+    bindClick("resetContactMappingForm", resetContactMappingForm);
 }
 
 function bindForms() {
@@ -106,42 +108,40 @@ function bindForms() {
         const body = data.get("body");
         const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
 
-        if (uploadedFiles.length) {
-            for (let index = 0; index < uploadedFiles.length; index += 1) {
-                const file = uploadedFiles[index];
-                await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
-                    method: "POST",
-                    body: {
-                        channel: "UI",
-                        sender_type: "AGENT",
-                        sender_identifier: state.user.email,
-                        file_url: file.file_token,
-                        document_type: "agent_attachment",
-                        message_body: index === 0 ? body : "Additional agent attachment",
-                        metadata: {
-                            source: "agent_workspace_upload",
-                            drive_file_id: driveFileIdFromToken(file.file_token),
-                            file_name: file.file_name,
-                            mime_type: file.mime_type
-                        }
-                    }
-                });
+        await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
+            method: "POST",
+            body: {
+                channel: state.currentTicket ? state.currentTicket.source_channel : "UI",
+                sender_type: "AGENT",
+                sender_identifier: state.user.email,
+                body,
+                attachment_urls: [],
+                metadata: { source: "agent_workspace" }
             }
-        } else {
-            await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
+        });
+
+        for (const file of uploadedFiles) {
+            await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
                 method: "POST",
                 body: {
-                    channel: "UI",
+                    channel: state.currentTicket ? state.currentTicket.source_channel : "UI",
                     sender_type: "AGENT",
                     sender_identifier: state.user.email,
-                    body,
-                    attachment_urls: [],
-                    metadata: { source: "agent_workspace" }
+                    file_url: file.file_token,
+                    document_type: "agent_attachment",
+                    message_body: "Agent attached a supporting document.",
+                    metadata: {
+                        source: "agent_workspace_upload",
+                        drive_file_id: driveFileIdFromToken(file.file_token),
+                        file_name: file.file_name,
+                        mime_type: file.mime_type
+                    }
                 }
             });
         }
 
-        pushEvent("Agent responded", `The agent replied on UI while preserving the same thread.`);
+        const origin = state.currentTicket ? channelLabel(state.currentTicket.source_channel) : "APP";
+        pushEvent("Agent responded", `The reply was delivered to ${origin} and recorded in the shared ticket thread.`);
         await refreshBoard(state.selectedTicketId);
     });
 
@@ -169,8 +169,25 @@ function bindForms() {
         });
         text(
             "adminCleanupResult",
-            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders.`
+            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_contact_mappings} contact mappings, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders.`
         );
+        await refreshAdminDashboard();
+    });
+
+    bindSubmit("contactMappingForm", async (event) => {
+        const data = new FormData(event.currentTarget);
+        const mappingId = data.get("mappingId");
+        const path = mappingId ? `/v1/admin/contact-mappings/${mappingId}` : "/v1/admin/contact-mappings";
+        const method = mappingId ? "PUT" : "POST";
+        const response = await api(path, {
+            method,
+            body: {
+                email: data.get("email"),
+                phone: data.get("phone")
+            }
+        });
+        text("contactMappingResult", `Saved mapping for ${response.data.email}.`);
+        resetContactMappingForm();
         await refreshAdminDashboard();
     });
 }
@@ -201,8 +218,13 @@ async function refreshAdminDashboard() {
     if (state.view !== "admin") {
         return;
     }
-    const response = await api("/v1/admin/summary");
-    renderAdminMetrics(response.data);
+    const [summaryResponse, mappingsResponse] = await Promise.all([
+        api("/v1/admin/summary"),
+        api("/v1/admin/contact-mappings")
+    ]);
+    state.contactMappings = mappingsResponse.data;
+    renderAdminMetrics(summaryResponse.data);
+    renderContactMappings();
 }
 
 function findRelevantTicketId() {
@@ -259,6 +281,7 @@ function renderAdminMetrics(summary) {
         { label: "Tickets", value: summary.tickets, copy: "Total tickets in database" },
         { label: "Documents", value: summary.documents, copy: "Stored ticket documents" },
         { label: "Messages", value: summary.messages, copy: "Conversation messages" },
+        { label: "Contact mappings", value: summary.contact_mappings, copy: "Strict email to phone mappings" },
         { label: "Identity links", value: summary.identity_links, copy: "Customer identifiers" },
         { label: "Audit logs", value: summary.audit_logs, copy: "Recorded audit events" },
         { label: "Merges", value: summary.merges, copy: "Ticket merge mappings" }
@@ -270,6 +293,39 @@ function renderAdminMetrics(summary) {
             <p>${metric.copy}</p>
         </article>
     `).join("");
+}
+
+function renderContactMappings() {
+    const container = el("contactMappingList");
+    if (!container) {
+        return;
+    }
+    const mappings = state.contactMappings || [];
+    if (!mappings.length) {
+        container.className = "queue-stack empty-state";
+        container.textContent = "No mappings yet.";
+        return;
+    }
+    container.className = "queue-stack";
+    container.innerHTML = mappings.map((mapping) => `
+        <article class="ticket-card mapping-card" data-mapping-id="${mapping.id}">
+            <div class="bubble-meta">
+                <strong>${escapeHtml(mapping.email)}</strong>
+                <span class="badge">${escapeHtml(mapping.phone)}</span>
+            </div>
+            <p class="ticket-supporting">Updated ${formatDate(mapping.updated_at)}</p>
+            <div class="actions-inline">
+                <button type="button" class="ghost-button mapping-edit" data-mapping-id="${mapping.id}">Edit</button>
+                <button type="button" class="ghost-button mapping-delete" data-mapping-id="${mapping.id}">Delete</button>
+            </div>
+        </article>
+    `).join("");
+    container.querySelectorAll(".mapping-edit").forEach((button) => {
+        button.addEventListener("click", () => populateContactMappingForm(button.dataset.mappingId));
+    });
+    container.querySelectorAll(".mapping-delete").forEach((button) => {
+        button.addEventListener("click", () => deleteContactMapping(button.dataset.mappingId).catch(handleError));
+    });
 }
 
 function renderQueueBoard() {
@@ -637,6 +693,40 @@ function bindClick(id, handler) {
             handleError(error);
         }
     });
+}
+
+function resetContactMappingForm() {
+    const form = el("contactMappingForm");
+    if (!form) {
+        return;
+    }
+    form.reset();
+    const mappingId = form.querySelector("[name='mappingId']");
+    if (mappingId) {
+        mappingId.value = "";
+    }
+    text("contactMappingResult", "");
+}
+
+function populateContactMappingForm(mappingId) {
+    const mapping = (state.contactMappings || []).find((item) => `${item.id}` === `${mappingId}`);
+    const form = el("contactMappingForm");
+    if (!mapping || !form) {
+        return;
+    }
+    form.querySelector("[name='mappingId']").value = mapping.id;
+    form.querySelector("[name='email']").value = mapping.email;
+    form.querySelector("[name='phone']").value = mapping.phone;
+    text("contactMappingResult", `Editing mapping for ${mapping.email}`);
+}
+
+async function deleteContactMapping(mappingId) {
+    await api(`/v1/admin/contact-mappings/${mappingId}`, {
+        method: "DELETE"
+    });
+    text("contactMappingResult", "Mapping deleted.");
+    resetContactMappingForm();
+    await refreshAdminDashboard();
 }
 
 function ensureTicketSelected() {

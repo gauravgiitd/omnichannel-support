@@ -71,6 +71,7 @@ support:
     enabled: ${WHATSAPP_CLOUD_API_ENABLED:false}
     verify-token: ${WHATSAPP_CLOUD_API_VERIFY_TOKEN:}
     access-token: ${WHATSAPP_CLOUD_API_ACCESS_TOKEN:}
+    phone-number-id: ${WHATSAPP_CLOUD_API_PHONE_NUMBER_ID:}
   outbound-email:
     from-address: support@company.example
     from-display-name: Company Support

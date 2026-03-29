@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class InboundWhatsAppService {
 
     private final IdentityResolutionService identityResolutionService;
+    private final CustomerContactMappingService customerContactMappingService;
     private final MessageRepository messageRepository;
     private final TicketRepository ticketRepository;
     private final TicketResolutionService ticketResolutionService;
@@ -196,9 +197,18 @@ public class InboundWhatsAppService {
         if (request.customerIdHint() != null && !request.customerIdHint().isBlank()) {
             return request.customerIdHint().trim();
         }
-        return identityResolutionService
-                .resolveCustomerId(IdentifierType.PHONE, request.fromE164Phone())
-                .orElseGet(() -> provisionCustomerForNewPhone(request.fromE164Phone()));
+        Optional<String> direct = identityResolutionService.resolveCustomerId(IdentifierType.PHONE, request.fromE164Phone());
+        if (direct.isPresent()) {
+            return direct.get();
+        }
+        Optional<String> mappedEmail = customerContactMappingService.counterpartForPhone(request.fromE164Phone());
+        if (mappedEmail.isPresent()) {
+            Optional<String> mappedCustomer = identityResolutionService.resolveCustomerId(IdentifierType.EMAIL, mappedEmail.get());
+            if (mappedCustomer.isPresent()) {
+                return mappedCustomer.get();
+            }
+        }
+        return provisionCustomerForNewPhone(request.fromE164Phone());
     }
 
     private String provisionCustomerForNewPhone(String phone) {

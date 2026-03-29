@@ -34,6 +34,7 @@ public class InboundEmailService {
     private static final Pattern SUBJECT_TICKET = Pattern.compile("(?i)\\b(TKT-[A-Z0-9-]+)\\b");
 
     private final IdentityResolutionService identityResolutionService;
+    private final CustomerContactMappingService customerContactMappingService;
     private final TicketRepository ticketRepository;
     private final MessageRepository messageRepository;
     private final TicketResolutionService ticketResolutionService;
@@ -179,9 +180,18 @@ public class InboundEmailService {
         if (request.customerIdHint() != null && !request.customerIdHint().isBlank()) {
             return request.customerIdHint().trim();
         }
-        return identityResolutionService
-                .resolveCustomerId(IdentifierType.EMAIL, request.fromAddress())
-                .orElseGet(() -> provisionCustomerForNewEmail(request.fromAddress()));
+        Optional<String> direct = identityResolutionService.resolveCustomerId(IdentifierType.EMAIL, request.fromAddress());
+        if (direct.isPresent()) {
+            return direct.get();
+        }
+        Optional<String> mappedPhone = customerContactMappingService.counterpartForEmail(request.fromAddress());
+        if (mappedPhone.isPresent()) {
+            Optional<String> mappedCustomer = identityResolutionService.resolveCustomerId(IdentifierType.PHONE, mappedPhone.get());
+            if (mappedCustomer.isPresent()) {
+                return mappedCustomer.get();
+            }
+        }
+        return provisionCustomerForNewEmail(request.fromAddress());
     }
 
     private String provisionCustomerForNewEmail(String fromAddress) {

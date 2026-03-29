@@ -1,16 +1,23 @@
 package com.omnichannel.support.api;
 
 import com.omnichannel.support.dto.ApiResponse;
+import com.omnichannel.support.dto.CustomerContactMappingDto;
+import com.omnichannel.support.dto.UpsertCustomerContactMappingRequest;
 import com.omnichannel.support.service.AdminCleanupService;
+import com.omnichannel.support.service.CustomerContactMappingService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
 
 @RestController
 @RequestMapping("/v1/admin")
@@ -18,10 +25,34 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminController {
 
     private final AdminCleanupService adminCleanupService;
+    private final CustomerContactMappingService customerContactMappingService;
 
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<AdminCleanupService.AdminSummary>> summary() {
         return ResponseEntity.ok(ApiResponse.success(adminCleanupService.summary()));
+    }
+
+    @GetMapping("/contact-mappings")
+    public ResponseEntity<ApiResponse<List<CustomerContactMappingDto>>> contactMappings() {
+        return ResponseEntity.ok(ApiResponse.success(customerContactMappingService.listAll()));
+    }
+
+    @PostMapping("/contact-mappings")
+    public ResponseEntity<ApiResponse<CustomerContactMappingDto>> createContactMapping(
+            @Valid @RequestBody UpsertCustomerContactMappingRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(customerContactMappingService.create(request)));
+    }
+
+    @PutMapping("/contact-mappings/{id}")
+    public ResponseEntity<ApiResponse<CustomerContactMappingDto>> updateContactMapping(
+            @PathVariable("id") Long id, @Valid @RequestBody UpsertCustomerContactMappingRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(customerContactMappingService.update(id, request)));
+    }
+
+    @DeleteMapping("/contact-mappings/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteContactMapping(@PathVariable("id") Long id) {
+        customerContactMappingService.delete(id);
+        return ResponseEntity.ok(ApiResponse.success(null));
     }
 
     @PostMapping("/cleanup")

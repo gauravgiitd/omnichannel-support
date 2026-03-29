@@ -8,6 +8,7 @@ public class WhatsAppCloudApiProperties {
     private boolean enabled;
     private String verifyToken;
     private String accessToken;
+    private String phoneNumberId;
 
     public boolean isEnabled() {
         return enabled;
@@ -31,5 +32,13 @@ public class WhatsAppCloudApiProperties {
 
     public void setAccessToken(String accessToken) {
         this.accessToken = accessToken;
+    }
+
+    public String getPhoneNumberId() {
+        return phoneNumberId;
+    }
+
+    public void setPhoneNumberId(String phoneNumberId) {
+        this.phoneNumberId = phoneNumberId;
     }
 }

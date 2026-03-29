@@ -3,6 +3,7 @@ package com.omnichannel.support.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.omnichannel.support.repo.AuditLogRepository;
+import com.omnichannel.support.repo.CustomerContactMappingRepository;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import com.omnichannel.support.repo.MessageRepository;
 import com.omnichannel.support.repo.TicketDocumentRepository;
@@ -22,6 +23,7 @@ public class AdminCleanupService {
     private final TicketDocumentRepository ticketDocumentRepository;
     private final MessageRepository messageRepository;
     private final TicketMergeMapRepository ticketMergeMapRepository;
+    private final CustomerContactMappingRepository customerContactMappingRepository;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
     private final AuditLogRepository auditLogRepository;
     private final TicketRepository ticketRepository;
@@ -43,6 +45,7 @@ public class AdminCleanupService {
         int messageCount = messageRepository.findAll().size();
         int mergeCount = ticketMergeMapRepository.findAll().size();
         int identityCount = customerIdentityLinkRepository.findAll().size();
+        int contactMappingCount = customerContactMappingRepository.findAll().size();
         int auditCount = auditLogRepository.findAll().size();
         int ticketCount = ticketRepository.findAll().size();
 
@@ -70,6 +73,7 @@ public class AdminCleanupService {
         messageRepository.deleteAllInBatch();
         ticketDocumentRepository.deleteAllInBatch();
         ticketMergeMapRepository.deleteAllInBatch();
+        customerContactMappingRepository.deleteAllInBatch();
         customerIdentityLinkRepository.deleteAllInBatch();
         ticketRepository.deleteAllInBatch();
 
@@ -78,6 +82,7 @@ public class AdminCleanupService {
                 documentCount,
                 messageCount,
                 identityCount,
+                contactMappingCount,
                 mergeCount,
                 auditCount,
                 deletedDriveFiles,
@@ -89,6 +94,7 @@ public class AdminCleanupService {
                 ticketRepository.count(),
                 ticketDocumentRepository.count(),
                 messageRepository.count(),
+                customerContactMappingRepository.count(),
                 customerIdentityLinkRepository.count(),
                 auditLogRepository.count(),
                 ticketMergeMapRepository.count());
@@ -115,6 +121,7 @@ public class AdminCleanupService {
             long tickets,
             long documents,
             long messages,
+            long contactMappings,
             long identityLinks,
             long auditLogs,
             long merges) {}
@@ -124,6 +131,7 @@ public class AdminCleanupService {
             int deletedDocuments,
             int deletedMessages,
             int deletedIdentityLinks,
+            int deletedContactMappings,
             int deletedMerges,
             int deletedAuditLogs,
             int deletedDriveFiles,

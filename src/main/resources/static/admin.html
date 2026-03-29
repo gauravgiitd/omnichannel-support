@@ -46,6 +46,37 @@
             <section class="panel">
                 <div class="panel-head">
                     <div>
+                        <p class="eyebrow">Identity Stitching</p>
+                        <h3>Email to phone mappings</h3>
+                    </div>
+                </div>
+                <form id="contactMappingForm" class="stack-form">
+                    <input type="hidden" name="mappingId">
+                    <div class="grid two">
+                        <label>
+                            Customer email
+                            <input name="email" type="email" placeholder="customer@example.com" required>
+                        </label>
+                        <label>
+                            Customer phone
+                            <input name="phone" type="text" placeholder="+919900001234" required>
+                        </label>
+                    </div>
+                    <div class="actions-inline">
+                        <button type="submit">Save mapping</button>
+                        <button type="button" class="ghost-button" id="resetContactMappingForm">Clear</button>
+                    </div>
+                    <p class="small-note">
+                        Each email and phone can appear only once. This mapping is used to stitch email and WhatsApp conversations into the same customer journey.
+                    </p>
+                </form>
+                <div id="contactMappingResult" class="small-note"></div>
+                <div id="contactMappingList" class="queue-stack empty-state">No mappings yet.</div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
                         <p class="eyebrow">Danger Zone</p>
                         <h3>Delete all prototype data</h3>
                     </div>
@@ -56,8 +87,8 @@
                         <input name="confirmation" type="text" placeholder="DELETE ALL DATA" required>
                     </label>
                     <p class="small-note">
-                        This removes customers, tickets, messages, documents, audit records, merge data, identity links,
-                        and Drive-backed files/folders created by the prototype.
+                        This removes customers, tickets, messages, documents, contact mappings, audit records, merge data,
+                        identity links, and Drive-backed files/folders created by the prototype.
                     </p>
                     <button type="submit" class="danger-button">Delete all data</button>
                 </form>
