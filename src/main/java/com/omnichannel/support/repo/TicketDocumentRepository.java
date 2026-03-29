@@ -11,6 +11,8 @@ public interface TicketDocumentRepository extends JpaRepository<TicketDocument, 
 
     List<TicketDocument> findByTicketOrderByCreatedAtAsc(Ticket ticket);
 
+    List<TicketDocument> findByTicketIn(List<Ticket> tickets);
+
     @EntityGraph(attributePaths = "ticket")
     Optional<TicketDocument> findByPublicId(String publicId);
 }

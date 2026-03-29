@@ -78,6 +78,31 @@
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Danger Zone</p>
+                        <h3>Delete one customer</h3>
+                    </div>
+                </div>
+                <form id="customerCleanupForm" class="stack-form">
+                    <label>
+                        Customer ID
+                        <input name="customerId" type="text" placeholder="CUST-123456" required>
+                    </label>
+                    <label>
+                        Type `DELETE CUSTOMER DATA` to confirm
+                        <input name="confirmation" type="text" placeholder="DELETE CUSTOMER DATA" required>
+                    </label>
+                    <p class="small-note">
+                        This removes the selected customer's tickets, messages, documents, identity links, related contact mappings,
+                        merge rows, audit entries, and app-managed Drive files/folders tied to that customer.
+                    </p>
+                    <button type="submit" class="danger-button">Delete customer data</button>
+                </form>
+                <div id="customerCleanupResult" class="small-note"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Danger Zone</p>
                         <h3>Delete all prototype data</h3>
                     </div>
                 </div>

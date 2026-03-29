@@ -174,6 +174,23 @@ function bindForms() {
         await refreshAdminDashboard();
     });
 
+    bindSubmit("customerCleanupForm", async (event) => {
+        const data = new FormData(event.currentTarget);
+        const response = await api("/v1/admin/cleanup/customer", {
+            method: "POST",
+            body: {
+                customerId: data.get("customerId"),
+                confirmation: data.get("confirmation")
+            }
+        });
+        text(
+            "customerCleanupResult",
+            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_contact_mappings} contact mappings, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders for ${response.data.customer_id}.`
+        );
+        event.currentTarget.reset();
+        await refreshAdminDashboard();
+    });
+
     bindSubmit("contactMappingForm", async (event) => {
         const data = new FormData(event.currentTarget);
         const mappingId = data.get("mappingId");

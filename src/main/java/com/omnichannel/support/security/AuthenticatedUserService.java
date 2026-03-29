@@ -2,6 +2,7 @@ package com.omnichannel.support.security;
 
 import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.error.ValidationException;
+import com.omnichannel.support.service.CustomerContactMappingService;
 import com.omnichannel.support.service.IdentityResolutionService;
 import java.util.LinkedHashSet;
 import java.util.Optional;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 public class AuthenticatedUserService {
 
     private final IdentityResolutionService identityResolutionService;
+    private final CustomerContactMappingService customerContactMappingService;
 
     public AppUser requireCurrentUser(Authentication authentication) {
         if (authentication == null || !(authentication.getPrincipal() instanceof OidcUser oidcUser)) {
@@ -29,9 +31,7 @@ public class AuthenticatedUserService {
             throw new ValidationException("Google account email is required");
         }
 
-        String customerId = identityResolutionService
-                .resolveCustomerId(IdentifierType.EMAIL, email)
-                .orElseGet(() -> provisionCustomer(email));
+        String customerId = resolveOrProvisionCustomer(email);
 
         Set<String> roles = new LinkedHashSet<>();
         for (GrantedAuthority authority : authentication.getAuthorities()) {
@@ -45,6 +45,31 @@ public class AuthenticatedUserService {
         String customerId = "CUST-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         identityResolutionService.registerLink(customerId, IdentifierType.EMAIL, email);
         return customerId;
+    }
+
+    private String resolveOrProvisionCustomer(String email) {
+        Optional<String> direct = identityResolutionService.resolveCustomerId(IdentifierType.EMAIL, email);
+        if (direct.isPresent()) {
+            linkMappedPhoneIfPresent(direct.get(), email);
+            return direct.get();
+        }
+
+        Optional<String> mappedPhone = customerContactMappingService.counterpartForEmail(email);
+        if (mappedPhone.isPresent()) {
+            Optional<String> mappedCustomer =
+                    identityResolutionService.resolveCustomerId(IdentifierType.PHONE, mappedPhone.get());
+            if (mappedCustomer.isPresent()) {
+                identityResolutionService.registerLink(mappedCustomer.get(), IdentifierType.EMAIL, email);
+                return mappedCustomer.get();
+            }
+        }
+
+        return provisionCustomer(email);
+    }
+
+    private void linkMappedPhoneIfPresent(String customerId, String email) {
+        customerContactMappingService.counterpartForEmail(email)
+                .ifPresent(phone -> identityResolutionService.registerLink(customerId, IdentifierType.PHONE, phone));
     }
 
     public boolean isAgent(Authentication authentication) {

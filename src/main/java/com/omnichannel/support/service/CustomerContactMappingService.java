@@ -82,12 +82,12 @@ public class CustomerContactMappingService {
     private void ensureUnique(String email, String phone, Long currentId) {
         customerContactMappingRepository.findByEmail(email).ifPresent(existing -> {
             if (currentId == null || !existing.getId().equals(currentId)) {
-                throw new ValidationException("email is already mapped to another phone");
+                throw new ValidationException("email " + email + " is already mapped to phone " + existing.getPhone());
             }
         });
         customerContactMappingRepository.findByPhone(phone).ifPresent(existing -> {
             if (currentId == null || !existing.getId().equals(currentId)) {
-                throw new ValidationException("phone is already mapped to another email");
+                throw new ValidationException("phone " + phone + " is already mapped to email " + existing.getEmail());
             }
         });
     }
@@ -96,7 +96,9 @@ public class CustomerContactMappingService {
         Optional<String> emailCustomer = identityResolutionService.resolveCustomerId(IdentifierType.EMAIL, email);
         Optional<String> phoneCustomer = identityResolutionService.resolveCustomerId(IdentifierType.PHONE, phone);
         if (emailCustomer.isPresent() && phoneCustomer.isPresent() && !emailCustomer.get().equals(phoneCustomer.get())) {
-            throw new ValidationException("email and phone are already linked to different customers");
+            throw new ValidationException("email " + email + " is linked to customer " + emailCustomer.get()
+                    + " while phone " + phone + " is linked to customer " + phoneCustomer.get()
+                    + ". Reconcile those customer identities before creating a 1:1 mapping.");
         }
     }
 

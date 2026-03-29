@@ -64,5 +64,16 @@ public class AdminController {
         return ResponseEntity.ok(ApiResponse.success(adminCleanupService.cleanupAllData()));
     }
 
+    @PostMapping("/cleanup/customer")
+    public ResponseEntity<ApiResponse<AdminCleanupService.CustomerCleanupResult>> cleanupCustomer(
+            @Valid @RequestBody CustomerCleanupRequest request) {
+        if (!"DELETE CUSTOMER DATA".equals(request.confirmation())) {
+            throw new com.omnichannel.support.error.ValidationException("confirmation text does not match");
+        }
+        return ResponseEntity.ok(ApiResponse.success(adminCleanupService.cleanupCustomerData(request.customerId())));
+    }
+
     public record CleanupRequest(@NotBlank String confirmation) {}
+
+    public record CustomerCleanupRequest(@NotBlank String customerId, @NotBlank String confirmation) {}
 }

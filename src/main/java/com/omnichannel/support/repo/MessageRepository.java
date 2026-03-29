@@ -11,6 +11,8 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
 
     List<Message> findByTicketOrderByCreatedAtAsc(Ticket ticket);
 
+    List<Message> findByTicketIn(List<Ticket> tickets);
+
     Optional<Message> findByPublicId(String publicId);
 
     @EntityGraph(attributePaths = "ticket")
