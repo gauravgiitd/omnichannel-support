@@ -62,6 +62,20 @@ public class InboundWhatsAppService {
             return createNewTicket(request, customerId, null);
         }
 
+        if (isExplicitNewTicketRequest(request.bodyText())) {
+            customerConversationContextService.clearPendingSelection(customerId, ChannelType.WHATSAPP);
+            customerConversationContextService.clearActiveTicket(customerId, ChannelType.WHATSAPP);
+            List<CustomerConversationContextService.SelectionOption> options =
+                    buildNewTicketOptions(customerId, activeJtbds);
+            if (options.size() == 1 && isStandaloneReference(options.get(0).reference())) {
+                return createNewTicket(request, customerId, null);
+            }
+            customerConversationContextService.setPendingSelection(
+                    customerId, ChannelType.WHATSAPP, PendingSelectionType.TARGET, options);
+            sendSelectionPrompt(request.fromE164Phone(), PendingSelectionType.TARGET, options);
+            return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
+        }
+
         Optional<Ticket> explicitTicket = resolveTargetTicket(request, customerId);
         if (explicitTicket.isPresent()) {
             Ticket ticket = ticketResolutionService.resolveCanonical(explicitTicket.get());
@@ -74,6 +88,9 @@ public class InboundWhatsAppService {
                 customerConversationContextService.matchPendingSelection(customerId, ChannelType.WHATSAPP, request.bodyText());
         if (selectionMatch.isPresent()) {
             customerConversationContextService.clearPendingSelection(customerId, ChannelType.WHATSAPP);
+            if (isStandaloneReference(selectionMatch.get().option().reference())) {
+                return createNewTicket(request, customerId, null);
+            }
             if (isTicketReference(selectionMatch.get().option().reference())) {
                 Ticket ticket = ticketService.loadCanonicalTicket(stripReferencePrefix(selectionMatch.get().option().reference()));
                 assertCustomerOwns(customerId, ticket);
@@ -301,6 +318,19 @@ public class InboundWhatsAppService {
                 || normalized.contains("CHANGE JTBD");
     }
 
+    private static boolean isExplicitNewTicketRequest(String body) {
+        if (body == null || body.isBlank()) {
+            return false;
+        }
+        String normalized = body.trim().toUpperCase(java.util.Locale.ROOT);
+        return normalized.equals("NEW TICKET")
+                || normalized.equals("NEW ISSUE")
+                || normalized.equals("CREATE TICKET")
+                || normalized.startsWith("NEW TICKET ")
+                || normalized.startsWith("NEW ISSUE ")
+                || normalized.startsWith("CREATE TICKET ");
+    }
+
     private static List<CustomerConversationContextService.SelectionOption> buildTicketSelectionOptions(List<Ticket> openTickets) {
         List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
         for (int i = 0; i < Math.min(openTickets.size(), MAX_SELECTION_OPTIONS); i++) {
@@ -349,6 +379,30 @@ public class InboundWhatsAppService {
         return options;
     }
 
+    private List<CustomerConversationContextService.SelectionOption> buildNewTicketOptions(
+            String customerId, List<CustomerJtbd> activeJtbds) {
+        List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
+        java.util.Set<Long> linkedJtbdIds = ticketRepository.findByCustomerIdOrderByCreatedAtDesc(customerId).stream()
+                .filter(ticket -> ticket.getCustomerJtbd() != null)
+                .map(ticket -> ticket.getCustomerJtbd().getId())
+                .collect(java.util.stream.Collectors.toSet());
+        int optionNumber = 1;
+        for (CustomerJtbd jtbd : activeJtbds) {
+            if (linkedJtbdIds.contains(jtbd.getId()) || options.size() >= MAX_SELECTION_OPTIONS - 1) {
+                continue;
+            }
+            options.add(new CustomerConversationContextService.SelectionOption(
+                    optionNumber++,
+                    "JTBD:" + jtbd.getPublicId(),
+                    "JTBD - " + jtbd.getJtbdType().getName() + " (" + jtbd.getCurrentStage().getStageName() + ")"));
+        }
+        options.add(new CustomerConversationContextService.SelectionOption(
+                optionNumber,
+                "NEW:STANDALONE",
+                "Something else - open a new ticket"));
+        return options;
+    }
+
     private static String buildPromptBody(
             PendingSelectionType type, List<CustomerConversationContextService.SelectionOption> options) {
         String topic = switch (type) {
@@ -375,12 +429,16 @@ public class InboundWhatsAppService {
         return switch (type) {
             case TICKET -> "Please choose which ticket you want to discuss.";
             case JTBD -> "Please choose which job you want help with.";
-            case TARGET -> "Please choose which support item you want to discuss.";
+            case TARGET -> "Please choose what you want to discuss or open a new ticket for.";
         };
     }
 
     private static boolean isTicketReference(String reference) {
         return reference != null && reference.startsWith("TICKET:");
+    }
+
+    private static boolean isStandaloneReference(String reference) {
+        return "NEW:STANDALONE".equals(reference);
     }
 
     private static String stripReferencePrefix(String reference) {
@@ -397,6 +455,9 @@ public class InboundWhatsAppService {
     private static String interactiveTitle(CustomerConversationContextService.SelectionOption option) {
         if (isTicketReference(option.reference())) {
             return stripReferencePrefix(option.reference());
+        }
+        if (isStandaloneReference(option.reference())) {
+            return "Something else";
         }
         String label = option.label();
         return label.length() <= 24 ? label : label.substring(0, 24);
