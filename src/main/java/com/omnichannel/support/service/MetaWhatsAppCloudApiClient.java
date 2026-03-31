@@ -90,6 +90,57 @@ public class MetaWhatsAppCloudApiClient {
         return null;
     }
 
+    public String sendInteractiveListMessage(
+            String toPhoneNumber,
+            String body,
+            String buttonText,
+            java.util.List<InteractiveListRow> rows)
+            throws IOException, InterruptedException {
+        String normalizedPhone = normalizeRecipient(toPhoneNumber);
+        java.util.List<Map<String, Object>> rowPayload = rows.stream()
+                .limit(10)
+                .map(row -> {
+                    java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                    payload.put("id", row.id());
+                    payload.put("title", truncate(row.title(), 24));
+                    if (hasText(row.description())) {
+                        payload.put("description", truncate(row.description(), 72));
+                    }
+                    return payload;
+                })
+                .toList();
+        Map<String, Object> interactive = Map.of(
+                "type", "list",
+                "body", Map.of("text", body),
+                "action", Map.of(
+                        "button", truncate(hasText(buttonText) ? buttonText : "Select", 20),
+                        "sections", java.util.List.of(Map.of(
+                                "title", "Support items",
+                                "rows", rowPayload))));
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create(GRAPH_BASE_URL + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + properties.getAccessToken())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                        "messaging_product", "whatsapp",
+                        "recipient_type", "individual",
+                        "to", normalizedPhone,
+                        "type", "interactive",
+                        "interactive", interactive))))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("WhatsApp send interactive list failed: " + response.statusCode() + " " + response.body());
+        }
+        JsonNode json = objectMapper.readTree(response.body());
+        JsonNode messages = json.path("messages");
+        if (messages.isArray() && !messages.isEmpty() && messages.get(0).hasNonNull("id")) {
+            return messages.get(0).path("id").asText();
+        }
+        return null;
+    }
+
     public String uploadMedia(String fileName, String mimeType, byte[] bytes) throws IOException, InterruptedException {
         String boundary = "wa-media-" + System.nanoTime();
         String safeMime = hasText(mimeType) ? mimeType : "application/octet-stream";
@@ -174,5 +225,20 @@ public class MetaWhatsAppCloudApiClient {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
+    private static String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        if (maxLength <= 1) {
+            return value.substring(0, maxLength);
+        }
+        return value.substring(0, maxLength - 1) + "…";
+    }
+
     public record MediaDescriptor(String mediaId, String downloadUrl, String mimeType) {}
+
+    public record InteractiveListRow(String id, String title, String description) {}
 }

@@ -143,8 +143,14 @@ public class MetaWhatsAppWebhookService {
         if (message.path("button").hasNonNull("text")) {
             return message.path("button").path("text").asText();
         }
+        if (message.path("interactive").path("button_reply").hasNonNull("id")) {
+            return message.path("interactive").path("button_reply").path("id").asText();
+        }
         if (message.path("interactive").path("button_reply").hasNonNull("title")) {
             return message.path("interactive").path("button_reply").path("title").asText();
+        }
+        if (message.path("interactive").path("list_reply").hasNonNull("id")) {
+            return message.path("interactive").path("list_reply").path("id").asText();
         }
         if (message.path("interactive").path("list_reply").hasNonNull("title")) {
             return message.path("interactive").path("list_reply").path("title").asText();

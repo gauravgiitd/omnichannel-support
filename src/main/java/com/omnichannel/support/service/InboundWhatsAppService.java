@@ -74,13 +74,13 @@ public class InboundWhatsAppService {
                 customerConversationContextService.matchPendingSelection(customerId, ChannelType.WHATSAPP, request.bodyText());
         if (selectionMatch.isPresent()) {
             customerConversationContextService.clearPendingSelection(customerId, ChannelType.WHATSAPP);
-            if (selectionMatch.get().type() == PendingSelectionType.TICKET) {
-                Ticket ticket = ticketService.loadCanonicalTicket(selectionMatch.get().option().reference());
+            if (isTicketReference(selectionMatch.get().option().reference())) {
+                Ticket ticket = ticketService.loadCanonicalTicket(stripReferencePrefix(selectionMatch.get().option().reference()));
                 assertCustomerOwns(customerId, ticket);
                 customerConversationContextService.setActiveTicket(customerId, ChannelType.WHATSAPP, ticket.getTicketNumber());
                 return appendToTicket(ticket, customerId, request);
             }
-            CustomerJtbd jtbd = jtbdService.loadCustomerJtbd(selectionMatch.get().option().reference());
+            CustomerJtbd jtbd = jtbdService.loadCustomerJtbd(stripReferencePrefix(selectionMatch.get().option().reference()));
             if (!jtbd.getCustomerId().equals(customerId)) {
                 throw new ValidationException("JTBD does not belong to resolved customer");
             }
@@ -90,17 +90,17 @@ public class InboundWhatsAppService {
         Optional<CustomerConversationContextService.PendingSelection> pendingSelection =
                 customerConversationContextService.pendingSelection(customerId, ChannelType.WHATSAPP);
         if (pendingSelection.isPresent()) {
-            sendSelectionPrompt(
-                    request.fromE164Phone(),
-                    buildPromptBody(pendingSelection.get().type(), pendingSelection.get().options()));
+            sendSelectionPrompt(request.fromE164Phone(), pendingSelection.get().type(), pendingSelection.get().options());
             return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
         }
+
+        Optional<Ticket> activeTicket = activeContextTicket(customerId);
 
         if (isSwitchToTicketRequest(request.bodyText()) && openTickets.size() > 1) {
             List<CustomerConversationContextService.SelectionOption> options = buildTicketSelectionOptions(openTickets);
             customerConversationContextService.setPendingSelection(
                     customerId, ChannelType.WHATSAPP, PendingSelectionType.TICKET, options);
-            sendSelectionPrompt(request.fromE164Phone(), buildPromptBody(PendingSelectionType.TICKET, options));
+            sendSelectionPrompt(request.fromE164Phone(), PendingSelectionType.TICKET, options);
             return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
         }
 
@@ -111,45 +111,36 @@ public class InboundWhatsAppService {
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
                     customerId, ChannelType.WHATSAPP, PendingSelectionType.JTBD, options);
-            sendSelectionPrompt(request.fromE164Phone(), buildPromptBody(PendingSelectionType.JTBD, options));
+            sendSelectionPrompt(request.fromE164Phone(), PendingSelectionType.JTBD, options);
             return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        if (!directReply && openTickets.size() > 1) {
-            List<CustomerConversationContextService.SelectionOption> options = buildTicketSelectionOptions(openTickets);
-            customerConversationContextService.setPendingSelection(
-                    customerId, ChannelType.WHATSAPP, PendingSelectionType.TICKET, options);
-            sendSelectionPrompt(request.fromE164Phone(), buildPromptBody(PendingSelectionType.TICKET, options));
-            return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
-        }
-
-        Optional<Ticket> activeTicket = activeContextTicket(customerId);
         if (activeTicket.isPresent()) {
             return appendToTicket(activeTicket.get(), customerId, request);
         }
 
-        if (!openTickets.isEmpty()) {
-            if (openTickets.size() == 1) {
-                Ticket ticket = openTickets.get(0);
-                customerConversationContextService.setActiveTicket(customerId, ChannelType.WHATSAPP, ticket.getTicketNumber());
-                return appendToTicket(ticket, customerId, request);
-            }
-            List<CustomerConversationContextService.SelectionOption> options = buildTicketSelectionOptions(openTickets);
+        List<CustomerConversationContextService.SelectionOption> targetOptions =
+                buildConversationTargetOptions(customerId, openTickets, activeJtbds);
+        if (!directReply && targetOptions.size() > 1) {
             customerConversationContextService.setPendingSelection(
-                    customerId, ChannelType.WHATSAPP, PendingSelectionType.TICKET, options);
-            sendSelectionPrompt(request.fromE164Phone(), buildPromptBody(PendingSelectionType.TICKET, options));
+                    customerId, ChannelType.WHATSAPP, PendingSelectionType.TARGET, targetOptions);
+            sendSelectionPrompt(request.fromE164Phone(), PendingSelectionType.TARGET, targetOptions);
             return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        if (!activeJtbds.isEmpty()) {
-            if (activeJtbds.size() == 1) {
-                return createNewTicket(request, customerId, activeJtbds.get(0));
+        if (targetOptions.size() == 1) {
+            String reference = targetOptions.get(0).reference();
+            if (isTicketReference(reference)) {
+                Ticket ticket = ticketService.loadCanonicalTicket(stripReferencePrefix(reference));
+                assertCustomerOwns(customerId, ticket);
+                customerConversationContextService.setActiveTicket(customerId, ChannelType.WHATSAPP, ticket.getTicketNumber());
+                return appendToTicket(ticket, customerId, request);
             }
-            List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
-            customerConversationContextService.setPendingSelection(
-                    customerId, ChannelType.WHATSAPP, PendingSelectionType.JTBD, options);
-            sendSelectionPrompt(request.fromE164Phone(), buildPromptBody(PendingSelectionType.JTBD, options));
-            return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
+            CustomerJtbd jtbd = jtbdService.loadCustomerJtbd(stripReferencePrefix(reference));
+            if (!jtbd.getCustomerId().equals(customerId)) {
+                throw new ValidationException("JTBD does not belong to resolved customer");
+            }
+            return createNewTicket(request, customerId, jtbd);
         }
 
         return createNewTicket(request, customerId, null);
@@ -262,8 +253,28 @@ public class InboundWhatsAppService {
         return Optional.empty();
     }
 
-    private void sendSelectionPrompt(String phone, String body) {
-        customerChannelNotificationService.send(ChannelType.WHATSAPP, phone, null, body);
+    private void sendSelectionPrompt(
+            String phone,
+            PendingSelectionType type,
+            List<CustomerConversationContextService.SelectionOption> options) {
+        try {
+            customerChannelNotificationService.sendWhatsAppSelectionList(
+                    phone,
+                    promptIntro(type),
+                    "Choose",
+                    options.stream()
+                            .map(option -> new MetaWhatsAppCloudApiClient.InteractiveListRow(
+                                    option.reference(),
+                                    interactiveTitle(option),
+                                    interactiveDescription(option)))
+                            .toList());
+        } catch (ValidationException ex) {
+            customerChannelNotificationService.send(
+                    ChannelType.WHATSAPP,
+                    phone,
+                    null,
+                    buildPromptBody(type, options));
+        }
     }
 
     private static boolean isSwitchToTicketRequest(String body) {
@@ -294,10 +305,14 @@ public class InboundWhatsAppService {
         List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
         for (int i = 0; i < Math.min(openTickets.size(), MAX_SELECTION_OPTIONS); i++) {
             Ticket ticket = openTickets.get(i);
+            String label = ticket.getTicketNumber() + " - " + ticket.getIssueType() + " (" + ticket.getStatus() + ")";
+            if (ticket.getCustomerJtbd() != null) {
+                label += " • JTBD: " + ticket.getCustomerJtbd().getJtbdType().getName();
+            }
             options.add(new CustomerConversationContextService.SelectionOption(
                     i + 1,
-                    ticket.getTicketNumber(),
-                    ticket.getTicketNumber() + " - " + ticket.getIssueType() + " (" + ticket.getStatus() + ")"));
+                    "TICKET:" + ticket.getTicketNumber(),
+                    label));
         }
         return options;
     }
@@ -308,15 +323,39 @@ public class InboundWhatsAppService {
             CustomerJtbd jtbd = activeJtbds.get(i);
             options.add(new CustomerConversationContextService.SelectionOption(
                     i + 1,
-                    jtbd.getPublicId(),
+                    "JTBD:" + jtbd.getPublicId(),
                     jtbd.getJtbdType().getName() + " - " + jtbd.getCurrentStage().getStageName()));
+        }
+        return options;
+    }
+
+    private List<CustomerConversationContextService.SelectionOption> buildConversationTargetOptions(
+            String customerId, List<Ticket> openTickets, List<CustomerJtbd> activeJtbds) {
+        List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>(buildTicketSelectionOptions(openTickets));
+        java.util.Set<Long> linkedJtbdIds = ticketRepository.findByCustomerIdOrderByCreatedAtDesc(customerId).stream()
+                .filter(ticket -> ticket.getCustomerJtbd() != null)
+                .map(ticket -> ticket.getCustomerJtbd().getId())
+                .collect(java.util.stream.Collectors.toSet());
+        int optionNumber = options.size() + 1;
+        for (CustomerJtbd jtbd : activeJtbds) {
+            if (linkedJtbdIds.contains(jtbd.getId()) || options.size() >= MAX_SELECTION_OPTIONS) {
+                continue;
+            }
+            options.add(new CustomerConversationContextService.SelectionOption(
+                    optionNumber++,
+                    "JTBD:" + jtbd.getPublicId(),
+                    "JTBD - " + jtbd.getJtbdType().getName() + " (" + jtbd.getCurrentStage().getStageName() + ")"));
         }
         return options;
     }
 
     private static String buildPromptBody(
             PendingSelectionType type, List<CustomerConversationContextService.SelectionOption> options) {
-        String topic = type == PendingSelectionType.TICKET ? "ticket" : "job";
+        String topic = switch (type) {
+            case TICKET -> "ticket";
+            case JTBD -> "job";
+            case TARGET -> "support item";
+        };
         StringBuilder builder = new StringBuilder("We found multiple ")
                 .append(topic)
                 .append(" options for your account. Reply with the number or reference for the one you mean:\n");
@@ -330,6 +369,41 @@ public class InboundWhatsAppService {
         }
         builder.append("We will keep the conversation on that selection until you ask about another one.");
         return builder.toString();
+    }
+
+    private static String promptIntro(PendingSelectionType type) {
+        return switch (type) {
+            case TICKET -> "Please choose which ticket you want to discuss.";
+            case JTBD -> "Please choose which job you want help with.";
+            case TARGET -> "Please choose which support item you want to discuss.";
+        };
+    }
+
+    private static boolean isTicketReference(String reference) {
+        return reference != null && reference.startsWith("TICKET:");
+    }
+
+    private static String stripReferencePrefix(String reference) {
+        if (reference == null) {
+            return null;
+        }
+        int separator = reference.indexOf(':');
+        if (separator < 0 || separator == reference.length() - 1) {
+            return reference;
+        }
+        return reference.substring(separator + 1);
+    }
+
+    private static String interactiveTitle(CustomerConversationContextService.SelectionOption option) {
+        if (isTicketReference(option.reference())) {
+            return stripReferencePrefix(option.reference());
+        }
+        String label = option.label();
+        return label.length() <= 24 ? label : label.substring(0, 24);
+    }
+
+    private static String interactiveDescription(CustomerConversationContextService.SelectionOption option) {
+        return option.label();
     }
 
     private void registerPolicyClaimHints(InboundWhatsAppRequest request, String customerId) {

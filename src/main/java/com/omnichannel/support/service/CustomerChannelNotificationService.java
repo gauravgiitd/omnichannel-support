@@ -97,6 +97,23 @@ public class CustomerChannelNotificationService {
         }
     }
 
+    public DirectDeliveryResult sendWhatsAppSelectionList(
+            String recipient, String body, String buttonText, java.util.List<MetaWhatsAppCloudApiClient.InteractiveListRow> rows) {
+        if (!metaWhatsAppCloudApiClient.canSendMessages()) {
+            throw new ValidationException("WhatsApp Cloud API outbound messaging is not configured");
+        }
+        try {
+            String messageId = metaWhatsAppCloudApiClient.sendInteractiveListMessage(recipient, body, buttonText, rows);
+            return new DirectDeliveryResult(
+                    ChannelType.WHATSAPP,
+                    recipient,
+                    messageId,
+                    Map.of("delivery", "whatsapp", "recipient", recipient, "interactive", true));
+        } catch (Exception ex) {
+            throw new ValidationException("failed to send WhatsApp notification");
+        }
+    }
+
     private static String buildOutboundMessageId() {
         return "<notify-" + UUID.randomUUID() + "@support.local>";
     }
