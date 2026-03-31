@@ -4,6 +4,8 @@ import com.omnichannel.support.config.SupportPlatformProperties;
 import com.omnichannel.support.domain.ChannelType;
 import com.omnichannel.support.error.ValidationException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -21,14 +23,19 @@ public class CustomerChannelNotificationService {
     private final SupportPlatformProperties properties;
 
     public DirectDeliveryResult send(ChannelType channel, String recipient, String subject, String body) {
+        return send(channel, recipient, subject, body, DeliveryOptions.none());
+    }
+
+    public DirectDeliveryResult send(
+            ChannelType channel, String recipient, String subject, String body, DeliveryOptions options) {
         return switch (channel) {
-            case EMAIL -> sendEmail(recipient, subject, body);
+            case EMAIL -> sendEmail(recipient, subject, body, options);
             case WHATSAPP -> sendWhatsApp(recipient, body);
             case UI -> new DirectDeliveryResult(ChannelType.UI, recipient, null, Map.of("delivery", "app_only"));
         };
     }
 
-    private DirectDeliveryResult sendEmail(String recipient, String subject, String body) {
+    private DirectDeliveryResult sendEmail(String recipient, String subject, String body, DeliveryOptions options) {
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
         if (mailSender == null) {
             throw new ValidationException("mail sender not configured");
@@ -43,6 +50,26 @@ public class CustomerChannelNotificationService {
             helper.setSubject(subject);
             helper.setText(body, false);
             mimeMessage.setHeader("Message-ID", messageId);
+            if (options.inReplyTo() != null && !options.inReplyTo().isBlank()) {
+                mimeMessage.setHeader("In-Reply-To", wrapAngles(stripAngles(options.inReplyTo())));
+            }
+            List<String> references = new ArrayList<>();
+            if (options.references() != null) {
+                options.references().stream()
+                        .filter(value -> value != null && !value.isBlank())
+                        .map(CustomerChannelNotificationService::stripAngles)
+                        .map(CustomerChannelNotificationService::wrapAngles)
+                        .forEach(references::add);
+            }
+            if (options.inReplyTo() != null && !options.inReplyTo().isBlank()) {
+                String inReplyTo = wrapAngles(stripAngles(options.inReplyTo()));
+                if (!references.contains(inReplyTo)) {
+                    references.add(inReplyTo);
+                }
+            }
+            if (!references.isEmpty()) {
+                mimeMessage.setHeader("References", String.join(" ", references));
+            }
             mailSender.send(mimeMessage);
             return new DirectDeliveryResult(
                     ChannelType.EMAIL,
@@ -82,6 +109,19 @@ public class CustomerChannelNotificationService {
             return messageId.substring(1, messageId.length() - 1);
         }
         return messageId;
+    }
+
+    private static String wrapAngles(String messageId) {
+        if (messageId == null || messageId.isBlank()) {
+            return messageId;
+        }
+        return "<" + stripAngles(messageId) + ">";
+    }
+
+    public record DeliveryOptions(String inReplyTo, List<String> references) {
+        public static DeliveryOptions none() {
+            return new DeliveryOptions(null, List.of());
+        }
     }
 
     public record DirectDeliveryResult(

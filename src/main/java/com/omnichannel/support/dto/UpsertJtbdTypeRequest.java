@@ -1,5 +1,6 @@
 package com.omnichannel.support.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import jakarta.validation.Valid;
@@ -17,8 +18,12 @@ public record UpsertJtbdTypeRequest(
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record StageRequest(
+            @JsonAlias("stageKey")
             @Size(max = 128) String stageKey,
+            @JsonAlias("stageName")
             @NotBlank @Size(max = 256) String stageName,
+            @JsonAlias("stageOrder")
             @NotNull Integer stageOrder,
+            @JsonAlias("terminalCompleted")
             boolean terminalCompleted) {}
 }

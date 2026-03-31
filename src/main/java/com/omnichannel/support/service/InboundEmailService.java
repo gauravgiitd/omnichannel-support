@@ -54,6 +54,11 @@ public class InboundEmailService {
         String customerId = resolveCustomerId(request);
         identityResolutionService.registerLink(customerId, IdentifierType.EMAIL, request.fromAddress());
         registerPolicyClaimHints(customerId, request);
+        List<Ticket> openTickets = ticketService.findOpenTicketsForCustomer(customerId).stream()
+                .map(ticketResolutionService::resolveCanonical)
+                .distinct()
+                .toList();
+        List<CustomerJtbd> activeJtbds = jtbdService.activeJtbdsForCustomer(customerId);
 
         if (Boolean.TRUE.equals(request.forceNewTicket())) {
             return createNewTicket(request, customerId, null);
@@ -88,9 +93,28 @@ public class InboundEmailService {
                 customerConversationContextService.pendingSelection(customerId, ChannelType.EMAIL);
         if (pendingSelection.isPresent()) {
             sendSelectionPrompt(
-                    request.fromAddress(),
+                    request,
                     "Which support item would you like to discuss?",
                     buildPromptBody(pendingSelection.get().type(), pendingSelection.get().options()));
+            return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
+        }
+
+        if (isSwitchToTicketRequest(request.bodyText()) && openTickets.size() > 1) {
+            List<CustomerConversationContextService.SelectionOption> options = buildTicketSelectionOptions(openTickets);
+            customerConversationContextService.setPendingSelection(
+                    customerId, ChannelType.EMAIL, PendingSelectionType.TICKET, options);
+            sendSelectionPrompt(request, "Which ticket would you like to discuss?", buildPromptBody(PendingSelectionType.TICKET, options));
+            return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
+        }
+
+        if (isSwitchToJtbdRequest(request.bodyText()) && !activeJtbds.isEmpty()) {
+            if (activeJtbds.size() == 1) {
+                return createNewTicket(request, customerId, activeJtbds.get(0));
+            }
+            List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
+            customerConversationContextService.setPendingSelection(
+                    customerId, ChannelType.EMAIL, PendingSelectionType.JTBD, options);
+            sendSelectionPrompt(request, "Which job would you like help with?", buildPromptBody(PendingSelectionType.JTBD, options));
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
@@ -99,50 +123,31 @@ public class InboundEmailService {
             return appendToTicket(activeTicket.get(), customerId, request);
         }
 
-        List<Ticket> openTickets = ticketService.findOpenTicketsForCustomer(customerId).stream()
-                .map(ticketResolutionService::resolveCanonical)
-                .distinct()
-                .toList();
         if (!openTickets.isEmpty()) {
             if (openTickets.size() == 1) {
                 Ticket ticket = openTickets.get(0);
                 customerConversationContextService.setActiveTicket(customerId, ChannelType.EMAIL, ticket.getTicketNumber());
                 return appendToTicket(ticket, customerId, request);
             }
-            List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
-            for (int i = 0; i < Math.min(openTickets.size(), MAX_SELECTION_OPTIONS); i++) {
-                Ticket ticket = openTickets.get(i);
-                options.add(new CustomerConversationContextService.SelectionOption(
-                        i + 1,
-                        ticket.getTicketNumber(),
-                        ticket.getTicketNumber() + " - " + ticket.getIssueType() + " (" + ticket.getStatus() + ")"));
-            }
+            List<CustomerConversationContextService.SelectionOption> options = buildTicketSelectionOptions(openTickets);
             customerConversationContextService.setPendingSelection(
                     customerId, ChannelType.EMAIL, PendingSelectionType.TICKET, options);
             sendSelectionPrompt(
-                    request.fromAddress(),
+                    request,
                     "Which ticket would you like to discuss?",
                     buildPromptBody(PendingSelectionType.TICKET, options));
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        List<CustomerJtbd> activeJtbds = jtbdService.activeJtbdsForCustomer(customerId);
         if (!activeJtbds.isEmpty()) {
             if (activeJtbds.size() == 1) {
                 return createNewTicket(request, customerId, activeJtbds.get(0));
             }
-            List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
-            for (int i = 0; i < Math.min(activeJtbds.size(), MAX_SELECTION_OPTIONS); i++) {
-                CustomerJtbd jtbd = activeJtbds.get(i);
-                options.add(new CustomerConversationContextService.SelectionOption(
-                        i + 1,
-                        jtbd.getPublicId(),
-                        jtbd.getJtbdType().getName() + " - " + jtbd.getCurrentStage().getStageName()));
-            }
+            List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
                     customerId, ChannelType.EMAIL, PendingSelectionType.JTBD, options);
             sendSelectionPrompt(
-                    request.fromAddress(),
+                    request,
                     "Which job would you like help with?",
                     buildPromptBody(PendingSelectionType.JTBD, options));
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
@@ -341,8 +346,72 @@ public class InboundEmailService {
         return Optional.empty();
     }
 
-    private void sendSelectionPrompt(String email, String subject, String body) {
-        customerChannelNotificationService.send(ChannelType.EMAIL, email, subject, body);
+    private void sendSelectionPrompt(InboundEmailRequest request, String subject, String body) {
+        customerChannelNotificationService.send(
+                ChannelType.EMAIL,
+                request.fromAddress(),
+                replySubject(request.subject(), subject),
+                body,
+                new CustomerChannelNotificationService.DeliveryOptions(request.messageId(), request.references()));
+    }
+
+    private static String replySubject(String originalSubject, String fallback) {
+        if (originalSubject == null || originalSubject.isBlank()) {
+            return fallback;
+        }
+        String trimmed = originalSubject.trim();
+        if (trimmed.regionMatches(true, 0, "Re:", 0, 3)) {
+            return trimmed;
+        }
+        return "Re: " + trimmed;
+    }
+
+    private static boolean isSwitchToTicketRequest(String body) {
+        if (body == null || body.isBlank()) {
+            return false;
+        }
+        String normalized = body.toUpperCase(Locale.ROOT);
+        return normalized.contains("SWITCH TICKET")
+                || normalized.contains("CHANGE TICKET")
+                || normalized.contains("ANOTHER TICKET")
+                || normalized.contains("DIFFERENT TICKET");
+    }
+
+    private static boolean isSwitchToJtbdRequest(String body) {
+        if (body == null || body.isBlank()) {
+            return false;
+        }
+        String normalized = body.toUpperCase(Locale.ROOT);
+        return normalized.contains("SWITCH JOB")
+                || normalized.contains("CHANGE JOB")
+                || normalized.contains("ANOTHER JOB")
+                || normalized.contains("DIFFERENT JOB")
+                || normalized.contains("SWITCH JTBD")
+                || normalized.contains("CHANGE JTBD");
+    }
+
+    private static List<CustomerConversationContextService.SelectionOption> buildTicketSelectionOptions(List<Ticket> openTickets) {
+        List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
+        for (int i = 0; i < Math.min(openTickets.size(), MAX_SELECTION_OPTIONS); i++) {
+            Ticket ticket = openTickets.get(i);
+            options.add(new CustomerConversationContextService.SelectionOption(
+                    i + 1,
+                    ticket.getTicketNumber(),
+                    ticket.getTicketNumber() + " - " + ticket.getIssueType() + " (" + ticket.getStatus() + ")"));
+        }
+        return options;
+    }
+
+    private static List<CustomerConversationContextService.SelectionOption> buildJtbdSelectionOptions(List<CustomerJtbd> activeJtbds) {
+        List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
+        for (int i = 0; i < Math.min(activeJtbds.size(), MAX_SELECTION_OPTIONS); i++) {
+            CustomerJtbd jtbd = activeJtbds.get(i);
+            options.add(new CustomerConversationContextService.SelectionOption(
+                    i + 1,
+                    jtbd.getPublicId(),
+                    jtbd.getJtbdType().getName() + " - " + jtbd.getCurrentStage().getStageName()));
+        }
+        return options;
     }
 
     private static String buildPromptBody(

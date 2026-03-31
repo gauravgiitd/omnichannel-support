@@ -1,9 +1,10 @@
 package com.omnichannel.support.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record UpdateCustomerJtbdRequest(@NotBlank @Size(max = 128) String stageKey) {}
+public record UpdateCustomerJtbdRequest(@JsonAlias("stageKey") @NotBlank @Size(max = 128) String stageKey) {}
