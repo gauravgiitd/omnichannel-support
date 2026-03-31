@@ -1,7 +1,9 @@
 package com.omnichannel.support.service;
 
 import com.omnichannel.support.domain.ChannelType;
+import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.IdentifierType;
+import com.omnichannel.support.domain.PendingSelectionType;
 import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Ticket;
 import com.omnichannel.support.domain.TicketPriority;
@@ -27,6 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class InboundWhatsAppService {
 
+    private static final java.util.regex.Pattern TICKET_NUMBER =
+            java.util.regex.Pattern.compile("(?i)\\b(TKT-[A-Z0-9-]+)\\b");
+    private static final int MAX_SELECTION_OPTIONS = 5;
+
     private final IdentityResolutionService identityResolutionService;
     private final CustomerContactMappingService customerContactMappingService;
     private final MessageRepository messageRepository;
@@ -35,6 +41,9 @@ public class InboundWhatsAppService {
     private final ConversationService conversationService;
     private final TicketService ticketService;
     private final DocumentService documentService;
+    private final JtbdService jtbdService;
+    private final CustomerConversationContextService customerConversationContextService;
+    private final CustomerChannelNotificationService customerChannelNotificationService;
     private final AuditService auditService;
 
     @Transactional
@@ -43,42 +52,140 @@ public class InboundWhatsAppService {
         identityResolutionService.registerLink(customerId, IdentifierType.PHONE, request.fromE164Phone());
         registerPolicyClaimHints(request, customerId);
 
-        Optional<Ticket> ticketOpt =
-                Boolean.TRUE.equals(request.forceNewTicket())
-                        ? Optional.empty()
-                        : resolveTargetTicket(request, customerId);
-
-        if (ticketOpt.isPresent()) {
-            Ticket ticket = ticketResolutionService.resolveCanonical(ticketOpt.get());
-            assertCustomerOwns(customerId, ticket);
-            List<DocumentDto> documents = registerWhatsAppDocuments(ticket, customerId, request);
-            List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
-            List<String> urls = documents.stream().map(DocumentDto::fileUrl).toList();
-            Map<String, Object> metadata = buildWaMetadata(request);
-            if (!docIds.isEmpty()) {
-                metadata.put("attachment_ids", docIds);
-            }
-            MessageDto message =
-                    conversationService.appendMessage(
-                            ticket,
-                            ChannelType.WHATSAPP,
-                            SenderType.CUSTOMER,
-                            request.fromE164Phone(),
-                            request.bodyText(),
-                            urls,
-                            request.waMessageId(),
-                            metadata);
-            auditService.record(
-                    "INBOUND_WHATSAPP_APPENDED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
-                    "SYSTEM",
-                    "whatsapp-adapter",
-                    Map.of("message_id", message.messageId()));
-            return new InboundWhatsAppResult(ticket.getTicketNumber(), message.messageId(), InboundOutcome.APPENDED);
+        if (Boolean.TRUE.equals(request.forceNewTicket())) {
+            return createNewTicket(request, customerId, null);
         }
 
+        Optional<Ticket> explicitTicket = resolveTargetTicket(request, customerId);
+        if (explicitTicket.isPresent()) {
+            Ticket ticket = ticketResolutionService.resolveCanonical(explicitTicket.get());
+            assertCustomerOwns(customerId, ticket);
+            customerConversationContextService.setActiveTicket(customerId, ChannelType.WHATSAPP, ticket.getTicketNumber());
+            return appendToTicket(ticket, customerId, request);
+        }
+
+        Optional<CustomerConversationContextService.SelectionMatch> selectionMatch =
+                customerConversationContextService.matchPendingSelection(customerId, ChannelType.WHATSAPP, request.bodyText());
+        if (selectionMatch.isPresent()) {
+            customerConversationContextService.clearPendingSelection(customerId, ChannelType.WHATSAPP);
+            if (selectionMatch.get().type() == PendingSelectionType.TICKET) {
+                Ticket ticket = ticketService.loadCanonicalTicket(selectionMatch.get().option().reference());
+                assertCustomerOwns(customerId, ticket);
+                customerConversationContextService.setActiveTicket(customerId, ChannelType.WHATSAPP, ticket.getTicketNumber());
+                return appendToTicket(ticket, customerId, request);
+            }
+            CustomerJtbd jtbd = jtbdService.loadCustomerJtbd(selectionMatch.get().option().reference());
+            if (!jtbd.getCustomerId().equals(customerId)) {
+                throw new ValidationException("JTBD does not belong to resolved customer");
+            }
+            return createNewTicket(request, customerId, jtbd);
+        }
+
+        Optional<CustomerConversationContextService.PendingSelection> pendingSelection =
+                customerConversationContextService.pendingSelection(customerId, ChannelType.WHATSAPP);
+        if (pendingSelection.isPresent()) {
+            sendSelectionPrompt(
+                    request.fromE164Phone(),
+                    buildPromptBody(pendingSelection.get().type(), pendingSelection.get().options()));
+            return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
+        }
+
+        Optional<Ticket> activeTicket = activeContextTicket(customerId);
+        if (activeTicket.isPresent()) {
+            return appendToTicket(activeTicket.get(), customerId, request);
+        }
+
+        List<Ticket> openTickets = ticketService.findOpenTicketsForCustomer(customerId).stream()
+                .map(ticketResolutionService::resolveCanonical)
+                .distinct()
+                .toList();
+        if (!openTickets.isEmpty()) {
+            if (openTickets.size() == 1) {
+                Ticket ticket = openTickets.get(0);
+                customerConversationContextService.setActiveTicket(customerId, ChannelType.WHATSAPP, ticket.getTicketNumber());
+                return appendToTicket(ticket, customerId, request);
+            }
+            List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
+            for (int i = 0; i < Math.min(openTickets.size(), MAX_SELECTION_OPTIONS); i++) {
+                Ticket ticket = openTickets.get(i);
+                options.add(new CustomerConversationContextService.SelectionOption(
+                        i + 1,
+                        ticket.getTicketNumber(),
+                        ticket.getTicketNumber() + " - " + ticket.getIssueType() + " (" + ticket.getStatus() + ")"));
+            }
+            customerConversationContextService.setPendingSelection(
+                    customerId, ChannelType.WHATSAPP, PendingSelectionType.TICKET, options);
+            sendSelectionPrompt(request.fromE164Phone(), buildPromptBody(PendingSelectionType.TICKET, options));
+            return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
+        }
+
+        List<CustomerJtbd> activeJtbds = jtbdService.activeJtbdsForCustomer(customerId);
+        if (!activeJtbds.isEmpty()) {
+            if (activeJtbds.size() == 1) {
+                return createNewTicket(request, customerId, activeJtbds.get(0));
+            }
+            List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
+            for (int i = 0; i < Math.min(activeJtbds.size(), MAX_SELECTION_OPTIONS); i++) {
+                CustomerJtbd jtbd = activeJtbds.get(i);
+                options.add(new CustomerConversationContextService.SelectionOption(
+                        i + 1,
+                        jtbd.getPublicId(),
+                        jtbd.getJtbdType().getName() + " - " + jtbd.getCurrentStage().getStageName()));
+            }
+            customerConversationContextService.setPendingSelection(
+                    customerId, ChannelType.WHATSAPP, PendingSelectionType.JTBD, options);
+            sendSelectionPrompt(request.fromE164Phone(), buildPromptBody(PendingSelectionType.JTBD, options));
+            return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
+        }
+
+        return createNewTicket(request, customerId, null);
+    }
+
+    private Optional<Ticket> activeContextTicket(String customerId) {
+        return customerConversationContextService.activeTicketNumber(customerId, ChannelType.WHATSAPP)
+                .flatMap(ticketRepository::findByTicketNumber)
+                .map(ticketResolutionService::resolveCanonical)
+                .filter(ticket -> ticket.getCustomerId().equals(customerId))
+                .filter(ticket -> ticketService.findOpenTicketsForCustomer(customerId).stream()
+                        .anyMatch(open -> open.getTicketNumber().equals(ticket.getTicketNumber())));
+    }
+
+    private InboundWhatsAppResult appendToTicket(Ticket ticket, String customerId, InboundWhatsAppRequest request) {
+        List<DocumentDto> documents = registerWhatsAppDocuments(ticket, customerId, request);
+        List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
+        List<String> urls = documents.stream().map(DocumentDto::fileUrl).toList();
         Map<String, Object> metadata = buildWaMetadata(request);
+        if (!docIds.isEmpty()) {
+            metadata.put("attachment_ids", docIds);
+        }
+        MessageDto message =
+                conversationService.appendMessage(
+                        ticket,
+                        ChannelType.WHATSAPP,
+                        SenderType.CUSTOMER,
+                        request.fromE164Phone(),
+                        request.bodyText(),
+                        urls,
+                        request.waMessageId(),
+                        metadata);
+        customerConversationContextService.setActiveTicket(customerId, ChannelType.WHATSAPP, ticket.getTicketNumber());
+        auditService.record(
+                "INBOUND_WHATSAPP_APPENDED",
+                "Ticket",
+                ticket.getTicketNumber(),
+                "SYSTEM",
+                "whatsapp-adapter",
+                Map.of("message_id", message.messageId()));
+        return new InboundWhatsAppResult(ticket.getTicketNumber(), message.messageId(), InboundOutcome.APPENDED);
+    }
+
+    private InboundWhatsAppResult createNewTicket(
+            InboundWhatsAppRequest request, String customerId, CustomerJtbd customerJtbd) {
+        Map<String, Object> metadata = buildWaMetadata(request);
+        if (customerJtbd != null) {
+            metadata.put("customer_jtbd_id", customerJtbd.getPublicId());
+            metadata.put("jtbd_type", customerJtbd.getJtbdType().getName());
+        }
         CreateTicketRequest create =
                 new CreateTicketRequest(
                         customerId,
@@ -92,7 +199,7 @@ public class InboundWhatsAppService {
                         request.fromE164Phone(),
                         metadata,
                         request.waMessageId());
-        TicketDto ticketDto = ticketService.createTicket(create);
+        TicketDto ticketDto = ticketService.createTicket(create, customerJtbd);
         Ticket ticket =
                 ticketRepository
                         .findByTicketNumber(ticketDto.ticketId())
@@ -103,6 +210,7 @@ public class InboundWhatsAppService {
         List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
         List<String> urls = documents.stream().map(DocumentDto::fileUrl).toList();
         conversationService.enrichLatestMessageWithInboundFiles(ticket, urls, docIds);
+        customerConversationContextService.setActiveTicket(customerId, ChannelType.WHATSAPP, ticket.getTicketNumber());
 
         auditService.record(
                 "INBOUND_WHATSAPP_NEW_TICKET",
@@ -110,7 +218,7 @@ public class InboundWhatsAppService {
                 ticketDto.ticketId(),
                 "SYSTEM",
                 "whatsapp-adapter",
-                Map.of());
+                customerJtbd != null ? Map.of("customer_jtbd_id", customerJtbd.getPublicId()) : Map.of());
         return new InboundWhatsAppResult(ticketDto.ticketId(), null, InboundOutcome.CREATED);
     }
 
@@ -129,7 +237,37 @@ public class InboundWhatsAppService {
                     .findByTicketNumber(request.ticketNumberHint().trim().toUpperCase())
                     .map(ticketResolutionService::resolveCanonical);
         }
-        return ticketService.findSingleOpenTicketForCustomer(customerId);
+        if (request.bodyText() != null) {
+            java.util.regex.Matcher matcher = TICKET_NUMBER.matcher(request.bodyText());
+            if (matcher.find()) {
+                return ticketRepository
+                        .findByTicketNumber(matcher.group(1).toUpperCase())
+                        .map(ticketResolutionService::resolveCanonical);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private void sendSelectionPrompt(String phone, String body) {
+        customerChannelNotificationService.send(ChannelType.WHATSAPP, phone, null, body);
+    }
+
+    private static String buildPromptBody(
+            PendingSelectionType type, List<CustomerConversationContextService.SelectionOption> options) {
+        String topic = type == PendingSelectionType.TICKET ? "ticket" : "job";
+        StringBuilder builder = new StringBuilder("We found multiple ")
+                .append(topic)
+                .append(" options for your account. Reply with the number or reference for the one you mean:\n");
+        for (CustomerConversationContextService.SelectionOption option : options) {
+            builder.append(option.optionNumber())
+                    .append(". ")
+                    .append(option.label())
+                    .append(" [")
+                    .append(option.reference())
+                    .append("]\n");
+        }
+        builder.append("We will keep the conversation on that selection until you ask about another one.");
+        return builder.toString();
     }
 
     private void registerPolicyClaimHints(InboundWhatsAppRequest request, String customerId) {
@@ -256,7 +394,8 @@ public class InboundWhatsAppService {
 
     public enum InboundOutcome {
         CREATED,
-        APPENDED
+        APPENDED,
+        PROMPTED
     }
 
     public record InboundWhatsAppResult(String ticketNumber, String messageId, InboundOutcome outcome) {}

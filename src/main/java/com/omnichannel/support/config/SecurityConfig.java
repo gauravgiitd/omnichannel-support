@@ -40,7 +40,7 @@ public class SecurityConfig {
                                 "/webhooks/meta/whatsapp",
                                 "/oauth2/**")
                         .permitAll()
-                        .requestMatchers("/admin", "/admin.html", "/v1/admin/**")
+                        .requestMatchers("/admin", "/admin.html", "/jtbd", "/jtbd.html", "/v1/admin/**")
                         .hasRole("ADMIN")
                         .requestMatchers("/agent", "/v1/tickets", "/v1/tickets/merge")
                         .hasAnyRole("AGENT", "ADMIN")

@@ -30,4 +30,9 @@ public class PrototypePageController {
     public String admin() {
         return "forward:/admin.html";
     }
+
+    @GetMapping("/jtbd")
+    public String jtbd() {
+        return "forward:/jtbd.html";
+    }
 }

@@ -1,6 +1,7 @@
 package com.omnichannel.support.service;
 
 import com.omnichannel.support.domain.ChannelType;
+import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Ticket;
 import com.omnichannel.support.domain.TicketStatus;
@@ -52,9 +53,15 @@ public class TicketService {
 
     @Transactional
     public TicketDto createTicket(CreateTicketRequest request) {
+        return createTicket(request, null);
+    }
+
+    @Transactional
+    public TicketDto createTicket(CreateTicketRequest request, CustomerJtbd customerJtbd) {
         Ticket ticket = new Ticket();
         ticket.setTicketNumber(ticketNumberGenerator.newTicketNumber());
         ticket.setCustomerId(request.customerId());
+        ticket.setCustomerJtbd(customerJtbd);
         ticket.setIssueType(request.issueType().trim());
         ticket.setLob(blankToNull(request.lob()));
         ticket.setClaimId(blankToNull(request.claimId()));

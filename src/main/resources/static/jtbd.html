@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JTBD Workspace</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body data-view="jtbd">
+<div class="page-shell">
+    <header class="hero">
+        <div>
+            <p class="eyebrow">JTBD Experience</p>
+            <p class="hero-copy">
+                Define JTBD types and stages, assign JTBD instances to customers, and update progress through completion.
+            </p>
+        </div>
+        <div class="hero-actions">
+            <a class="route-link" href="/admin">Admin UI</a>
+            <a class="route-link" href="/customer">Customer UI</a>
+            <a class="route-link" href="/agent">Agent UI</a>
+            <a class="route-link" href="/logout">Sign out</a>
+        </div>
+    </header>
+
+    <section class="surface agent-surface">
+        <div class="surface-head">
+            <div>
+                <p class="eyebrow">Admin JTBD UI</p>
+                <h2>JTBD definitions and customer instances</h2>
+            </div>
+            <span class="small-note" id="jtbdIdentity">Signed in with Google</span>
+        </div>
+
+        <div class="subgrid">
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">JTBD Types</p>
+                        <h3>Create and edit JTBD types</h3>
+                    </div>
+                    <button type="button" class="ghost-button" id="refreshJtbdView">Refresh</button>
+                </div>
+                <form id="jtbdTypeForm" class="stack-form">
+                    <input type="hidden" name="jtbdTypeId">
+                    <label>
+                        JTBD name
+                        <input name="name" type="text" placeholder="Renew vehicle policy" required>
+                    </label>
+                    <label>
+                        Description
+                        <textarea name="description" rows="3" placeholder="Customer job summary"></textarea>
+                    </label>
+                    <label>
+                        Stages
+                        <textarea name="stages" rows="8" placeholder="discover:Discover need&#10;collect_docs:Collect documents&#10;review:Review request&#10;completed:Completed*"></textarea>
+                    </label>
+                    <p class="small-note">One stage per line as `key:Stage name`. Mark the terminal completed stage with `*` at the end.</p>
+                    <div class="actions-inline">
+                        <button type="submit">Save JTBD type</button>
+                        <button type="button" class="ghost-button" id="resetJtbdTypeForm">Clear</button>
+                    </div>
+                </form>
+                <div id="jtbdTypeResult" class="small-note"></div>
+                <div id="jtbdTypeList" class="queue-stack empty-state">No JTBD types yet.</div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Customers</p>
+                        <h3>Create and update customer JTBD instances</h3>
+                    </div>
+                </div>
+                <form id="customerJtbdForm" class="stack-form">
+                    <label>
+                        Customer
+                        <select name="customerId" id="jtbdCustomerSelect" required></select>
+                    </label>
+                    <label>
+                        JTBD type
+                        <select name="jtbdTypeId" id="jtbdTypeSelect" required></select>
+                    </label>
+                    <button type="submit">Create JTBD for customer</button>
+                </form>
+                <div id="customerJtbdResult" class="small-note"></div>
+                <div id="jtbdCustomerList" class="queue-stack empty-state">No customers yet.</div>
+            </section>
+        </div>
+    </section>
+</div>
+
+<script src="/app.js" defer></script>
+</body>
+</html>

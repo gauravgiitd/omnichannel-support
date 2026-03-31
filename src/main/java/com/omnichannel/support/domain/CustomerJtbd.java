@@ -18,54 +18,32 @@ import lombok.Getter;
 import lombok.Setter;
 
 @Entity
-@Table(name = "tickets")
+@Table(name = "customer_jtbds")
 @Getter
 @Setter
-public class Ticket {
+public class CustomerJtbd {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "ticket_number", nullable = false, unique = true, length = 32)
-    private String ticketNumber;
+    @Column(name = "public_id", nullable = false, unique = true, length = 36)
+    private String publicId;
 
     @Column(name = "customer_id", nullable = false, length = 64)
     private String customerId;
 
-    @Column(name = "issue_type", nullable = false, length = 128)
-    private String issueType;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "jtbd_type_id", nullable = false)
+    private JtbdType jtbdType;
 
-    @Column(length = 64)
-    private String lob;
-
-    @Column(name = "claim_id", length = 64)
-    private String claimId;
-
-    @Column(name = "policy_id", length = 64)
-    private String policyId;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "current_stage_id", nullable = false)
+    private JtbdTypeStage currentStage;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
-    private TicketStatus status;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 32)
-    private TicketPriority priority;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "source_channel", nullable = false, length = 32)
-    private ChannelType sourceChannel;
-
-    @Column(name = "assigned_queue", length = 128)
-    private String assignedQueue;
-
-    @Column(name = "assigned_agent", length = 128)
-    private String assignedAgent;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "customer_jtbd_id")
-    private CustomerJtbd customerJtbd;
+    private JtbdInstanceStatus status;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;

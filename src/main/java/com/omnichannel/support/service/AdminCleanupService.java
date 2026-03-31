@@ -52,7 +52,6 @@ public class AdminCleanupService {
         int messageCount = messageRepository.findAll().size();
         int mergeCount = ticketMergeMapRepository.findAll().size();
         int identityCount = customerIdentityLinkRepository.findAll().size();
-        int contactMappingCount = customerContactMappingRepository.findAll().size();
         int auditCount = auditLogRepository.findAll().size();
         int ticketCount = ticketRepository.findAll().size();
 
@@ -80,7 +79,6 @@ public class AdminCleanupService {
         messageRepository.deleteAllInBatch();
         ticketDocumentRepository.deleteAllInBatch();
         ticketMergeMapRepository.deleteAllInBatch();
-        customerContactMappingRepository.deleteAllInBatch();
         customerIdentityLinkRepository.deleteAllInBatch();
         ticketRepository.deleteAllInBatch();
 
@@ -89,7 +87,7 @@ public class AdminCleanupService {
                 documentCount,
                 messageCount,
                 identityCount,
-                contactMappingCount,
+                0,
                 mergeCount,
                 auditCount,
                 deletedDriveFiles,
@@ -121,7 +119,7 @@ public class AdminCleanupService {
                 .filter(mapping -> emails.contains(mapping.getEmail()) || phones.contains(mapping.getPhone()))
                 .toList();
 
-        if (tickets.isEmpty() && identityLinks.isEmpty() && contactMappings.isEmpty()) {
+        if (tickets.isEmpty() && identityLinks.isEmpty()) {
             throw new NotFoundException("no customer data found for " + normalizedCustomerId);
         }
 
@@ -183,9 +181,6 @@ public class AdminCleanupService {
         if (!merges.isEmpty()) {
             ticketMergeMapRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(merges)));
         }
-        if (!contactMappings.isEmpty()) {
-            customerContactMappingRepository.deleteAllInBatch(contactMappings);
-        }
         if (!identityLinks.isEmpty()) {
             customerIdentityLinkRepository.deleteAllInBatch(identityLinks);
         }
@@ -199,7 +194,7 @@ public class AdminCleanupService {
                 documents.size(),
                 messages.size(),
                 identityLinks.size(),
-                contactMappings.size(),
+                0,
                 merges.size(),
                 auditLogs.size(),
                 deletedDriveFiles,

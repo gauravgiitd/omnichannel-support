@@ -10,6 +10,10 @@ const state = {
     tickets: [],
     customerTickets: [],
     contactMappings: [],
+    jtbdTypes: [],
+    jtbdCustomers: [],
+    customerJtbdsByCustomer: {},
+    selectedJtbdCustomerId: null,
     selectedTicketId: ticketFromUrl || localStorage.getItem(STORAGE_KEYS.ticketId),
     currentTicket: null,
     messages: [],
@@ -28,6 +32,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     bindForms();
     await loadSession();
     syncUserIdentity();
+    if (state.view === "jtbd") {
+        await refreshJtbdDashboard();
+        return;
+    }
     await refreshBoard();
 });
 
@@ -56,6 +64,8 @@ function bindControls() {
     bindClick("toggleStartSupport", toggleStartSupport);
     bindClick("refreshAdmin", refreshAdminDashboard);
     bindClick("resetContactMappingForm", resetContactMappingForm);
+    bindClick("refreshJtbdView", refreshJtbdDashboard);
+    bindClick("resetJtbdTypeForm", resetJtbdTypeForm);
 }
 
 function bindForms() {
@@ -178,7 +188,7 @@ function bindForms() {
         });
         text(
             "adminCleanupResult",
-            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_contact_mappings} contact mappings, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders.`
+            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders. Email-to-phone mappings were preserved.`
         );
         await refreshAdminDashboard();
     });
@@ -194,7 +204,7 @@ function bindForms() {
         });
         text(
             "customerCleanupResult",
-            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_contact_mappings} contact mappings, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders for ${response.data.customer_id}.`
+            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders for ${response.data.customer_id}. Email-to-phone mappings were preserved.`
         );
         event.currentTarget.reset();
         await refreshAdminDashboard();
@@ -227,6 +237,39 @@ function bindForms() {
             `Ticket ${debug.ticket_id} belongs to ${debug.customer_id}, started on ${debug.source_channel}, and will currently reply to ${debug.resolved_outbound_recipient || "no resolved recipient"}.`
         );
         text("ticketDeliveryDebugResult", JSON.stringify(debug, null, 2));
+    });
+
+    bindSubmit("jtbdTypeForm", async (event) => {
+        const data = new FormData(event.currentTarget);
+        const jtbdTypeId = `${data.get("jtbdTypeId") || ""}`.trim();
+        const payload = {
+            name: data.get("name"),
+            description: blankOrNull(data.get("description")),
+            stages: parseJtbdStages(data.get("stages"))
+        };
+        const path = jtbdTypeId ? `/v1/admin/jtbds/types/${jtbdTypeId}` : "/v1/admin/jtbds/types";
+        const method = jtbdTypeId ? "PUT" : "POST";
+        const response = await api(path, {
+            method,
+            body: payload
+        });
+        text("jtbdTypeResult", `Saved JTBD type ${response.data.name}.`);
+        resetJtbdTypeForm();
+        await refreshJtbdDashboard();
+    });
+
+    bindSubmit("customerJtbdForm", async (event) => {
+        const data = new FormData(event.currentTarget);
+        const customerId = `${data.get("customerId") || ""}`.trim();
+        const response = await api(`/v1/admin/jtbds/customers/${encodeURIComponent(customerId)}/instances`, {
+            method: "POST",
+            body: {
+                jtbdTypeId: data.get("jtbdTypeId")
+            }
+        });
+        state.selectedJtbdCustomerId = customerId;
+        text("customerJtbdResult", `Created JTBD ${response.data.jtbd_type_name} for ${customerId}.`);
+        await refreshJtbdDashboard();
     });
 }
 
@@ -263,6 +306,31 @@ async function refreshAdminDashboard() {
     state.contactMappings = mappingsResponse.data;
     renderAdminMetrics(summaryResponse.data);
     renderContactMappings();
+}
+
+async function refreshJtbdDashboard() {
+    if (state.view !== "jtbd") {
+        return;
+    }
+    const [typeResponse, customerResponse] = await Promise.all([
+        api("/v1/admin/jtbds/types"),
+        api("/v1/admin/jtbds/customers")
+    ]);
+    state.jtbdTypes = typeResponse.data;
+    state.jtbdCustomers = customerResponse.data;
+
+    const instanceResponses = await Promise.all(
+        state.jtbdCustomers.map((customer) =>
+            api(`/v1/admin/jtbds/customers/${encodeURIComponent(customer.customer_id)}/instances`)
+                .then((payload) => [customer.customer_id, payload.data]))
+    );
+    state.customerJtbdsByCustomer = Object.fromEntries(instanceResponses);
+    if (!state.selectedJtbdCustomerId && state.jtbdCustomers.length) {
+        state.selectedJtbdCustomerId = state.jtbdCustomers[0].customer_id;
+    }
+    populateJtbdSelects();
+    renderJtbdTypes();
+    renderJtbdCustomers();
 }
 
 function findRelevantTicketId() {
@@ -363,6 +431,94 @@ function renderContactMappings() {
     });
     container.querySelectorAll(".mapping-delete").forEach((button) => {
         button.addEventListener("click", () => deleteContactMapping(button.dataset.mappingId).catch(handleError));
+    });
+}
+
+function renderJtbdTypes() {
+    const container = el("jtbdTypeList");
+    if (!container) {
+        return;
+    }
+    if (!state.jtbdTypes.length) {
+        container.className = "queue-stack empty-state";
+        container.textContent = "No JTBD types yet.";
+        return;
+    }
+    container.className = "queue-stack";
+    container.innerHTML = state.jtbdTypes.map((type) => `
+        <article class="ticket-card mapping-card" data-jtbd-type-id="${type.public_id}">
+            <div class="bubble-meta">
+                <strong>${escapeHtml(type.name)}</strong>
+                <span class="badge">${type.stages.length} stages</span>
+            </div>
+            <p class="ticket-supporting">${escapeHtml(type.description || "No description")}</p>
+            <p class="small-note">${type.stages.map((stage) => `${stage.stage_name}${stage.terminal_completed ? " (completed)" : ""}`).join(" -> ")}</p>
+            <div class="actions-inline">
+                <button type="button" class="ghost-button jtbd-type-edit" data-jtbd-type-id="${type.public_id}">Edit</button>
+                <button type="button" class="ghost-button jtbd-type-delete" data-jtbd-type-id="${type.public_id}">Delete</button>
+            </div>
+        </article>
+    `).join("");
+    container.querySelectorAll(".jtbd-type-edit").forEach((button) => {
+        button.addEventListener("click", () => populateJtbdTypeForm(button.dataset.jtbdTypeId));
+    });
+    container.querySelectorAll(".jtbd-type-delete").forEach((button) => {
+        button.addEventListener("click", () => deleteJtbdType(button.dataset.jtbdTypeId).catch(handleError));
+    });
+}
+
+function renderJtbdCustomers() {
+    const container = el("jtbdCustomerList");
+    if (!container) {
+        return;
+    }
+    if (!state.jtbdCustomers.length) {
+        container.className = "queue-stack empty-state";
+        container.textContent = "No customers yet.";
+        return;
+    }
+    container.className = "queue-stack";
+    container.innerHTML = state.jtbdCustomers.map((customer) => {
+        const instances = state.customerJtbdsByCustomer[customer.customer_id] || [];
+        return `
+            <article class="ticket-card customer-ticket-card ${state.selectedJtbdCustomerId === customer.customer_id ? "active expanded" : ""}">
+                <div class="customer-ticket-summary">
+                    <div class="bubble-meta">
+                        <strong>${escapeHtml(customer.customer_id)}</strong>
+                        <span class="badge">${customer.active_jtbd_count} active JTBDs</span>
+                    </div>
+                    <p class="ticket-supporting">${[...(customer.emails || []), ...(customer.phones || [])].join(" • ") || "No identifiers"}</p>
+                </div>
+                <div class="queue-stack">
+                    ${instances.length ? instances.map((instance) => `
+                        <div class="ticket-card mapping-card">
+                            <div class="bubble-meta">
+                                <strong>${escapeHtml(instance.jtbd_type_name)}</strong>
+                                <span class="badge">${escapeHtml(instance.status)}</span>
+                            </div>
+                            <p class="ticket-supporting">${escapeHtml(instance.public_id)} • ${escapeHtml(instance.current_stage_name)}</p>
+                            <div class="actions-inline">
+                                <select class="jtbd-stage-select" data-customer-jtbd-id="${instance.public_id}">
+                                    ${instance.stages.map((stage) => `
+                                        <option value="${stage.stage_key}" ${stage.stage_key === instance.current_stage_key ? "selected" : ""}>
+                                            ${escapeHtml(stage.stage_name)}${stage.terminal_completed ? " (completed)" : ""}
+                                        </option>
+                                    `).join("")}
+                                </select>
+                                <button type="button" class="ghost-button jtbd-instance-update" data-customer-jtbd-id="${instance.public_id}">Update stage</button>
+                                <button type="button" class="ghost-button jtbd-instance-delete" data-customer-jtbd-id="${instance.public_id}">Delete</button>
+                            </div>
+                        </div>
+                    `).join("") : `<div class="empty-state">No JTBDs on this customer yet.</div>`}
+                </div>
+            </article>
+        `;
+    }).join("");
+    container.querySelectorAll(".jtbd-instance-update").forEach((button) => {
+        button.addEventListener("click", () => updateCustomerJtbd(button.dataset.customerJtbdId).catch(handleError));
+    });
+    container.querySelectorAll(".jtbd-instance-delete").forEach((button) => {
+        button.addEventListener("click", () => deleteCustomerJtbd(button.dataset.customerJtbdId).catch(handleError));
     });
 }
 
@@ -746,6 +902,19 @@ function resetContactMappingForm() {
     text("contactMappingResult", "");
 }
 
+function resetJtbdTypeForm() {
+    const form = el("jtbdTypeForm");
+    if (!form) {
+        return;
+    }
+    form.reset();
+    const jtbdTypeId = form.querySelector("[name='jtbdTypeId']");
+    if (jtbdTypeId) {
+        jtbdTypeId.value = "";
+    }
+    text("jtbdTypeResult", "");
+}
+
 function populateContactMappingForm(mappingId) {
     const mapping = (state.contactMappings || []).find((item) => `${item.id}` === `${mappingId}`);
     const form = el("contactMappingForm");
@@ -758,6 +927,21 @@ function populateContactMappingForm(mappingId) {
     text("contactMappingResult", `Editing mapping for ${mapping.email}`);
 }
 
+function populateJtbdTypeForm(jtbdTypeId) {
+    const type = (state.jtbdTypes || []).find((item) => item.public_id === jtbdTypeId);
+    const form = el("jtbdTypeForm");
+    if (!type || !form) {
+        return;
+    }
+    form.querySelector("[name='jtbdTypeId']").value = type.public_id;
+    form.querySelector("[name='name']").value = type.name;
+    form.querySelector("[name='description']").value = type.description || "";
+    form.querySelector("[name='stages']").value = type.stages
+        .map((stage) => `${stage.stage_key}:${stage.stage_name}${stage.terminal_completed ? "*" : ""}`)
+        .join("\n");
+    text("jtbdTypeResult", `Editing JTBD type ${type.name}`);
+}
+
 async function deleteContactMapping(mappingId) {
     await api(`/v1/admin/contact-mappings/${mappingId}`, {
         method: "DELETE"
@@ -765,6 +949,56 @@ async function deleteContactMapping(mappingId) {
     text("contactMappingResult", "Mapping deleted.");
     resetContactMappingForm();
     await refreshAdminDashboard();
+}
+
+async function deleteJtbdType(jtbdTypeId) {
+    await api(`/v1/admin/jtbds/types/${jtbdTypeId}`, {
+        method: "DELETE"
+    });
+    text("jtbdTypeResult", "JTBD type deleted.");
+    resetJtbdTypeForm();
+    await refreshJtbdDashboard();
+}
+
+async function updateCustomerJtbd(customerJtbdId) {
+    const selector = document.querySelector(`.jtbd-stage-select[data-customer-jtbd-id="${customerJtbdId}"]`);
+    const response = await api(`/v1/admin/jtbds/instances/${customerJtbdId}`, {
+        method: "PUT",
+        body: {
+            stageKey: selector ? selector.value : ""
+        }
+    });
+    text("customerJtbdResult", `Updated ${response.data.jtbd_type_name} to ${response.data.current_stage_name}.`);
+    await refreshJtbdDashboard();
+}
+
+async function deleteCustomerJtbd(customerJtbdId) {
+    await api(`/v1/admin/jtbds/instances/${customerJtbdId}`, {
+        method: "DELETE"
+    });
+    text("customerJtbdResult", "Customer JTBD deleted.");
+    await refreshJtbdDashboard();
+}
+
+function populateJtbdSelects() {
+    const customerSelect = el("jtbdCustomerSelect");
+    if (customerSelect) {
+        customerSelect.innerHTML = state.jtbdCustomers.map((customer) => `
+            <option value="${customer.customer_id}" ${customer.customer_id === state.selectedJtbdCustomerId ? "selected" : ""}>
+                ${escapeHtml(customer.customer_id)}${customer.emails?.length ? ` • ${escapeHtml(customer.emails[0])}` : ""}
+            </option>
+        `).join("");
+        customerSelect.addEventListener("change", () => {
+            state.selectedJtbdCustomerId = customerSelect.value;
+        });
+    }
+
+    const typeSelect = el("jtbdTypeSelect");
+    if (typeSelect) {
+        typeSelect.innerHTML = state.jtbdTypes.map((type) => `
+            <option value="${type.public_id}">${escapeHtml(type.name)}</option>
+        `).join("");
+    }
 }
 
 function ensureTicketSelected() {
@@ -885,6 +1119,9 @@ function syncUserIdentity() {
     text("adminIdentity", state.user.roles && state.user.roles.includes("ROLE_ADMIN")
         ? `Signed in as ${state.user.name || state.user.email}`
         : state.user.email);
+    text("jtbdIdentity", state.user.roles && state.user.roles.includes("ROLE_ADMIN")
+        ? `Signed in as ${state.user.name || state.user.email}`
+        : state.user.email);
 }
 
 function el(id) {
@@ -914,6 +1151,25 @@ function setFormValue(selector, value) {
 
 function parseCsv(value) {
     return `${value || ""}`.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function parseJtbdStages(value) {
+    return `${value || ""}`.split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line, index) => {
+            const terminalCompleted = line.endsWith("*");
+            const cleaned = terminalCompleted ? line.slice(0, -1).trim() : line;
+            const [rawKey, ...nameParts] = cleaned.split(":");
+            const stageName = nameParts.length ? nameParts.join(":").trim() : rawKey.trim();
+            const stageKey = nameParts.length ? rawKey.trim() : "";
+            return {
+                stageKey: stageKey || null,
+                stageName,
+                stageOrder: index + 1,
+                terminalCompleted
+            };
+        });
 }
 
 function pruneEmpty(payload) {

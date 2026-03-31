@@ -4,12 +4,9 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -18,54 +15,34 @@ import lombok.Getter;
 import lombok.Setter;
 
 @Entity
-@Table(name = "tickets")
+@Table(name = "customer_conversation_contexts")
 @Getter
 @Setter
-public class Ticket {
+public class CustomerConversationContext {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "ticket_number", nullable = false, unique = true, length = 32)
-    private String ticketNumber;
-
     @Column(name = "customer_id", nullable = false, length = 64)
     private String customerId;
 
-    @Column(name = "issue_type", nullable = false, length = 128)
-    private String issueType;
-
-    @Column(length = 64)
-    private String lob;
-
-    @Column(name = "claim_id", length = 64)
-    private String claimId;
-
-    @Column(name = "policy_id", length = 64)
-    private String policyId;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
-    private TicketStatus status;
+    private ChannelType channel;
+
+    @Column(name = "active_ticket_number", length = 32)
+    private String activeTicketNumber;
+
+    @Column(name = "active_customer_jtbd_public_id", length = 36)
+    private String activeCustomerJtbdPublicId;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 32)
-    private TicketPriority priority;
+    @Column(name = "pending_selection_type", length = 32)
+    private PendingSelectionType pendingSelectionType;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "source_channel", nullable = false, length = 32)
-    private ChannelType sourceChannel;
-
-    @Column(name = "assigned_queue", length = 128)
-    private String assignedQueue;
-
-    @Column(name = "assigned_agent", length = 128)
-    private String assignedAgent;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "customer_jtbd_id")
-    private CustomerJtbd customerJtbd;
+    @Column(name = "pending_options_json", columnDefinition = "TEXT")
+    private String pendingOptionsJson;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;

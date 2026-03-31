@@ -109,8 +109,9 @@
                         <input name="confirmation" type="text" placeholder="DELETE CUSTOMER DATA" required>
                     </label>
                     <p class="small-note">
-                        This removes the selected customer's tickets, messages, documents, identity links, related contact mappings,
+                        This removes the selected customer's tickets, messages, documents, identity links,
                         merge rows, audit entries, and app-managed Drive files/folders tied to that customer.
+                        Email-to-phone mappings are preserved.
                     </p>
                     <button type="submit" class="danger-button">Delete customer data</button>
                 </form>
@@ -130,8 +131,9 @@
                         <input name="confirmation" type="text" placeholder="DELETE ALL DATA" required>
                     </label>
                     <p class="small-note">
-                        This removes customers, tickets, messages, documents, contact mappings, audit records, merge data,
+                        This removes customers, tickets, messages, documents, audit records, merge data,
                         identity links, and Drive-backed files/folders created by the prototype.
+                        Email-to-phone mappings are preserved.
                     </p>
                     <button type="submit" class="danger-button">Delete all data</button>
                 </form>
