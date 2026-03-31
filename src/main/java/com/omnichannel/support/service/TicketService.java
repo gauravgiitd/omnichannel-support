@@ -357,6 +357,10 @@ public class TicketService {
         return new TicketDto(
                 ticket.getTicketNumber(),
                 ticket.getCustomerId(),
+                ticket.getCustomerJtbd() != null ? ticket.getCustomerJtbd().getPublicId() : null,
+                ticket.getCustomerJtbd() != null ? ticket.getCustomerJtbd().getJtbdType().getName() : null,
+                ticket.getCustomerJtbd() != null ? ticket.getCustomerJtbd().getCurrentStage().getStageName() : null,
+                ticket.getCustomerJtbd() != null ? ticket.getCustomerJtbd().getStatus().name() : null,
                 ticket.getIssueType(),
                 ticket.getLob(),
                 ticket.getClaimId(),

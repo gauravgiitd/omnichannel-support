@@ -11,6 +11,10 @@ import java.time.Instant;
 public record TicketDto(
         String ticketId,
         String customerId,
+        String customerJtbdId,
+        String customerJtbdTypeName,
+        String customerJtbdStageName,
+        String customerJtbdStatus,
         String issueType,
         String lob,
         String claimId,

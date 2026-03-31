@@ -14,6 +14,7 @@ const state = {
     jtbdCustomers: [],
     customerJtbdsByCustomer: {},
     selectedJtbdCustomerId: null,
+    agentCustomerFilter: "ALL",
     selectedTicketId: ticketFromUrl || localStorage.getItem(STORAGE_KEYS.ticketId),
     currentTicket: null,
     messages: [],
@@ -66,6 +67,13 @@ function bindControls() {
     bindClick("resetContactMappingForm", resetContactMappingForm);
     bindClick("refreshJtbdView", refreshJtbdDashboard);
     bindClick("resetJtbdTypeForm", resetJtbdTypeForm);
+    const agentCustomerFilter = el("agentCustomerFilter");
+    if (agentCustomerFilter) {
+        agentCustomerFilter.addEventListener("change", (event) => {
+            state.agentCustomerFilter = event.target.value || "ALL";
+            renderQueueBoard();
+        });
+    }
 }
 
 function bindForms() {
@@ -528,12 +536,15 @@ function renderQueueBoard() {
         return;
     }
 
+    populateAgentCustomerFilter();
+    const visibleTickets = filteredAgentTickets();
     const groups = [
-        { title: "Open tickets", className: "triage", matcher: (_queue, ticket) => !["RESOLVED", "CLOSED"].includes(ticket.status) }
+        { title: "Open tickets", className: "triage", matcher: (_queue, ticket) => !["RESOLVED", "CLOSED"].includes(ticket.status) },
+        { title: "Closed tickets", className: "closed", matcher: (_queue, ticket) => ["RESOLVED", "CLOSED"].includes(ticket.status) }
     ];
 
     queueBoard.innerHTML = groups.map((group) => {
-        const tickets = state.tickets.filter((ticket) => group.matcher(ticket.assigned_queue, ticket));
+        const tickets = visibleTickets.filter((ticket) => group.matcher(ticket.assigned_queue, ticket));
         return `
             <section class="queue-column ${group.className}">
                 <h4>${group.title}</h4>
@@ -552,6 +563,7 @@ function renderQueueBoard() {
 function renderTicketCard(ticket) {
     const active = state.selectedTicketId === ticket.ticket_id ? "active" : "";
     const missingData = !ticket.policy_id && !ticket.claim_id;
+    const jtbdCopy = ticket.customer_jtbd_type_name ? ` • JTBD ${ticket.customer_jtbd_type_name}` : "";
 
     return `
         <article class="ticket-card ${active}" data-ticket-id="${ticket.ticket_id}">
@@ -563,7 +575,7 @@ function renderTicketCard(ticket) {
                 <span class="badge">${ticket.source_channel}</span>
                 <span class="badge">${ticket.status}</span>
             </div>
-            <p class="ticket-supporting">${ticket.customer_id} • ${ticket.issue_type || "unclassified"} • ${ticket.assigned_queue || "triage"}</p>
+            <p class="ticket-supporting">${ticket.customer_id} • ${ticket.issue_type || "unclassified"} • ${ticket.assigned_queue || "triage"}${jtbdCopy}</p>
         </article>
     `;
 }
@@ -589,11 +601,39 @@ function renderAgentWorkspace() {
             state.currentTicket.claim_id ? badge(`Claim ${state.currentTicket.claim_id}`) : ""
         ].join("");
     }
+    const jtbdMeta = el("ticketJtbdMeta");
+    if (jtbdMeta) {
+        jtbdMeta.textContent = state.currentTicket.customer_jtbd_id
+            ? `JTBD ${state.currentTicket.customer_jtbd_type_name} • Stage ${state.currentTicket.customer_jtbd_stage_name} • ${state.currentTicket.customer_jtbd_status}`
+            : "No JTBD linked to this ticket.";
+    }
 
     text("timelineCount", `${state.messages.length} messages`);
     text("documentCount", `${state.documents.length} docs`);
     renderChatThread("messageTimeline", state.messages, false);
     renderDocuments();
+}
+
+function filteredAgentTickets() {
+    if (state.view !== "agent" || state.agentCustomerFilter === "ALL") {
+        return state.tickets;
+    }
+    return (state.tickets || []).filter((ticket) => ticket.customer_id === state.agentCustomerFilter);
+}
+
+function populateAgentCustomerFilter() {
+    const select = el("agentCustomerFilter");
+    if (!select || state.view !== "agent") {
+        return;
+    }
+    const customers = [...new Set((state.tickets || []).map((ticket) => ticket.customer_id))].sort();
+    const current = state.agentCustomerFilter || "ALL";
+    select.innerHTML = `
+        <option value="ALL">All customers</option>
+        ${customers.map((customerId) => `<option value="${escapeHtml(customerId)}">${escapeHtml(customerId)}</option>`).join("")}
+    `;
+    select.value = customers.includes(current) ? current : "ALL";
+    state.agentCustomerFilter = select.value;
 }
 
 function renderCustomerExperience() {
@@ -772,6 +812,7 @@ function syncFormsWithTicket() {
 function clearWorkspace() {
     text("ticketHeading", "Select a ticket");
     html("ticketMeta", "");
+    text("ticketJtbdMeta", "");
     renderChatThread("messageTimeline", [], false);
     renderChatThread("customerChat", [], true);
     const documentList = el("documentList");

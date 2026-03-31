@@ -184,6 +184,7 @@ label {
 .subpanel-head,
 .actions-inline,
 .ticket-meta,
+.filter-inline,
 .customer-chip,
 .form-footer,
 .bubble-meta,
@@ -297,7 +298,7 @@ label {
 }
 
 .board-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .queue-column {
@@ -308,9 +309,22 @@ label {
 }
 
 .queue-column.triage { background: var(--triage); }
+.queue-column.closed { background: rgba(107, 98, 89, 0.08); }
 .queue-column.claims { background: var(--claims); }
 .queue-column.policy { background: var(--policy); }
 .queue-column.billing { background: var(--billing); }
+
+.filter-inline label {
+    min-width: 240px;
+}
+
+.ticket-jtbd-strip {
+    margin: 8px 0 16px;
+    padding: 12px 14px;
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.58);
+}
 
 .queue-stack,
 .document-list,

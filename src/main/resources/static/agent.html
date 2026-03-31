@@ -39,6 +39,14 @@
                         <p class="eyebrow">Routing</p>
                         <h3>Queue overview</h3>
                     </div>
+                    <div class="filter-inline">
+                        <label>
+                            Customer filter
+                            <select id="agentCustomerFilter">
+                                <option value="ALL">All customers</option>
+                            </select>
+                        </label>
+                    </div>
                 </div>
                 <div class="metric-grid" id="metrics"></div>
                 <div class="board-grid" id="queueBoard"></div>
@@ -52,6 +60,7 @@
                     </div>
                     <div id="ticketMeta" class="ticket-meta"></div>
                 </div>
+                <div id="ticketJtbdMeta" class="ticket-jtbd-strip small-note"></div>
 
                 <div class="agent-workspace">
                     <div class="workspace-column">
