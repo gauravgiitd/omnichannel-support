@@ -1198,24 +1198,24 @@ function renderSenderMeta(message, customerView) {
     if (customerView) {
         if (message.sender_type === "CUSTOMER") {
             return {
-                badge: "You",
-                detail: state.user?.email || identifier
+                badge: state.user?.email || identifier,
+                detail: "You"
             };
         }
         if (message.sender_type === "AGENT") {
             return {
-                badge: "Support",
-                detail: identifier
+                badge: identifier,
+                detail: "Support"
             };
         }
         if (message.sender_type === "EXPERT") {
             return {
-                badge: "Expert",
-                detail: identifier
+                badge: identifier,
+                detail: "Expert"
             };
         }
         return {
-            badge: "System",
+            badge: identifier,
             detail: identifier
         };
     }
@@ -1557,9 +1557,10 @@ function ensureAgentCustomerSelected() {
 
 async function submitCustomerComposeForm(event) {
     const data = new FormData(event.currentTarget);
-    const body = data.get("body");
+    const body = `${data.get("body") || ""}`.trim();
     const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
     let requestId = state.selectedRequestId;
+    let createdNewRequest = false;
 
     if (!requestId) {
         const created = await api("/v1/customers/me/requests", {
@@ -1578,6 +1579,22 @@ async function submitCustomerComposeForm(event) {
             }
         });
         requestId = created.data.request_id;
+        createdNewRequest = true;
+        persistRequestId(requestId);
+    }
+
+    if (!createdNewRequest && body) {
+        await api(`/v1/customers/me/requests/${encodeURIComponent(requestId)}/messages`, {
+            method: "POST",
+            body: {
+                channel: "UI",
+                sender_type: "CUSTOMER",
+                sender_identifier: state.user.email,
+                body,
+                attachment_urls: [],
+                metadata: { source: "customer_conversation" }
+            }
+        });
     }
 
     if (uploadedFiles.length) {
@@ -1591,7 +1608,11 @@ async function submitCustomerComposeForm(event) {
                     sender_identifier: state.user.email,
                     file_url: file.file_token,
                     document_type: "supporting_document",
-                    message_body: index === 0 ? body : "Additional supporting document",
+                    message_body: createdNewRequest && index === 0
+                        ? "Customer shared a supporting document."
+                        : index === 0
+                            ? "Customer shared a supporting document."
+                            : "Additional supporting document",
                     metadata: {
                         source: "customer_conversation_upload",
                         drive_file_id: driveFileIdFromToken(file.file_token),
@@ -1601,18 +1622,6 @@ async function submitCustomerComposeForm(event) {
                 })
             });
         }
-    } else {
-        await api(`/v1/customers/me/requests/${encodeURIComponent(requestId)}/messages`, {
-            method: "POST",
-            body: {
-                channel: "UI",
-                sender_type: "CUSTOMER",
-                sender_identifier: state.user.email,
-                body,
-                attachment_urls: [],
-                metadata: { source: "customer_conversation" }
-            }
-        });
     }
 
     pushEvent("Customer conversation updated", "Your message and any documents were added to the same customer conversation.");
@@ -1687,20 +1696,14 @@ function syncUserIdentity() {
     if (!state.user) {
         return;
     }
-    text("customerIdentity", state.user.name || state.user.email);
-    text("customerIdentityLabel", state.user.email);
-    text("agentIdentity", state.user.agent
-        ? `Signed in as ${state.user.name || state.user.email}`
-        : state.user.email);
-    text("adminIdentity", state.user.roles && state.user.roles.includes("ROLE_ADMIN")
-        ? `Signed in as ${state.user.name || state.user.email}`
-        : state.user.email);
-    text("jtbdIdentity", state.user.roles && state.user.roles.includes("ROLE_ADMIN")
-        ? `Signed in as ${state.user.name || state.user.email}`
-        : state.user.email);
-    text("expertIdentity", state.user.roles && state.user.roles.includes("ROLE_EXPERT")
-        ? `Signed in as ${state.user.name || state.user.email}`
-        : state.user.email);
+    const email = state.user.email || "Signed in user";
+    const name = state.user.name && state.user.name !== email ? state.user.name : null;
+    text("customerIdentity", email);
+    text("customerIdentityLabel", name || "Signed in customer");
+    text("agentIdentity", name ? `${email} • ${name}` : email);
+    text("adminIdentity", name ? `${email} • ${name}` : email);
+    text("jtbdIdentity", name ? `${email} • ${name}` : email);
+    text("expertIdentity", name ? `${email} • ${name}` : email);
 }
 
 function resolveAgentSelectedTask(workspace) {
