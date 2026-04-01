@@ -1,6 +1,7 @@
 package com.omnichannel.support.service;
 
 import com.omnichannel.support.domain.ChannelType;
+import com.omnichannel.support.domain.Conversation;
 import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.PendingSelectionType;
@@ -42,6 +43,7 @@ public class InboundEmailService {
     private final MessageRepository messageRepository;
     private final TaskResolutionService taskResolutionService;
     private final ConversationService conversationService;
+    private final CustomerConversationService customerConversationService;
     private final TaskService taskService;
     private final DocumentService documentService;
     private final JtbdService jtbdService;
@@ -86,7 +88,8 @@ public class InboundEmailService {
             if (!jtbd.getCustomerId().equals(customerId)) {
                 throw new ValidationException("JTBD does not belong to resolved customer");
             }
-            return createNewTask(request, customerId, jtbd);
+            customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, jtbd.getPublicId());
+            return appendToConversation(customerId, jtbd, request);
         }
 
         Optional<CustomerConversationContextService.PendingSelection> pendingSelection =
@@ -99,17 +102,10 @@ public class InboundEmailService {
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        if (isSwitchToTaskRequest(request.bodyText()) && openTasks.size() > 1) {
-            List<CustomerConversationContextService.SelectionOption> options = buildTaskSelectionOptions(openTasks);
-            customerConversationContextService.setPendingSelection(
-                    customerId, ChannelType.EMAIL, PendingSelectionType.TICKET, options);
-            sendSelectionPrompt(request, "Which request would you like to discuss?", buildPromptBody(PendingSelectionType.TICKET, options));
-            return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
-        }
-
         if (isSwitchToJtbdRequest(request.bodyText()) && !activeJtbds.isEmpty()) {
             if (activeJtbds.size() == 1) {
-                return createNewTask(request, customerId, activeJtbds.get(0));
+                customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, activeJtbds.get(0).getPublicId());
+                return appendToConversation(customerId, activeJtbds.get(0), request);
             }
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
@@ -118,30 +114,15 @@ public class InboundEmailService {
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        Optional<Task> activeTask = activeContextTask(customerId);
-        if (activeTask.isPresent()) {
-            return appendToTask(activeTask.get(), customerId, request);
-        }
-
-        if (!openTasks.isEmpty()) {
-            if (openTasks.size() == 1) {
-                Task task = openTasks.get(0);
-                customerConversationContextService.setActiveTask(customerId, ChannelType.EMAIL, task.getTaskNumber());
-                return appendToTask(task, customerId, request);
-            }
-            List<CustomerConversationContextService.SelectionOption> options = buildTaskSelectionOptions(openTasks);
-            customerConversationContextService.setPendingSelection(
-                    customerId, ChannelType.EMAIL, PendingSelectionType.TICKET, options);
-            sendSelectionPrompt(
-                    request,
-                    "Which request would you like to discuss?",
-                    buildPromptBody(PendingSelectionType.TICKET, options));
-            return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
+        Optional<CustomerJtbd> activeJtbd = activeContextJtbd(customerId);
+        if (activeJtbd.isPresent()) {
+            return appendToConversation(customerId, activeJtbd.get(), request);
         }
 
         if (!activeJtbds.isEmpty()) {
             if (activeJtbds.size() == 1) {
-                return createNewTask(request, customerId, activeJtbds.get(0));
+                customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, activeJtbds.get(0).getPublicId());
+                return appendToConversation(customerId, activeJtbds.get(0), request);
             }
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
@@ -153,7 +134,7 @@ public class InboundEmailService {
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        return createNewTask(request, customerId, null);
+        return appendToConversation(customerId, null, request);
     }
 
     private Optional<Task> activeContextTask(String customerId) {
@@ -163,6 +144,12 @@ public class InboundEmailService {
                 .filter(task -> task.getCustomerId().equals(customerId))
                 .filter(task -> taskService.findOpenTasksForCustomer(customerId).stream()
                         .anyMatch(open -> open.getTaskNumber().equals(task.getTaskNumber())));
+    }
+
+    private Optional<CustomerJtbd> activeContextJtbd(String customerId) {
+        return customerConversationContextService.activeCustomerJtbdPublicId(customerId, ChannelType.EMAIL)
+                .map(jtbdService::loadCustomerJtbd)
+                .filter(jtbd -> jtbd.getCustomerId().equals(customerId));
     }
 
     private InboundEmailResult appendToTask(Task canonical, String customerId, InboundEmailRequest request) {
@@ -192,6 +179,47 @@ public class InboundEmailService {
                 "email-adapter",
                 Map.of("message_id", message.messageId()));
         return new InboundEmailResult(canonical.getTaskNumber(), message.messageId(), InboundOutcome.APPENDED);
+    }
+
+    private InboundEmailResult appendToConversation(
+            String customerId, CustomerJtbd customerJtbd, InboundEmailRequest request) {
+        Conversation conversation = customerConversationService.getOrCreate(customerId, ChannelType.EMAIL);
+        List<DocumentDto> documents = registerEmailAttachments(conversation, customerJtbd, customerId, request);
+        List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
+        List<String> fileUrls = documents.stream().map(DocumentDto::fileUrl).toList();
+        Map<String, Object> metadata = buildEmailMetadata(request);
+        if (customerJtbd != null) {
+            metadata.put("customer_jtbd_id", customerJtbd.getPublicId());
+        }
+        if (!docIds.isEmpty()) {
+            metadata.put("attachment_ids", docIds);
+        }
+        MessageDto message =
+                conversationService.appendMessage(
+                        conversation,
+                        customerJtbd,
+                        null,
+                        ChannelType.EMAIL,
+                        SenderType.CUSTOMER,
+                        request.fromAddress(),
+                        request.bodyText(),
+                        fileUrls,
+                        normalizeMessageId(request.messageId()),
+                        metadata);
+        if (customerJtbd != null) {
+            customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, customerJtbd.getPublicId());
+        } else {
+            customerConversationContextService.clearActiveTask(customerId, ChannelType.EMAIL);
+            customerConversationContextService.clearActiveJtbd(customerId, ChannelType.EMAIL);
+        }
+        auditService.record(
+                "INBOUND_EMAIL_CONVERSATION_APPENDED",
+                "Conversation",
+                conversation.getPublicId(),
+                "SYSTEM",
+                "email-adapter",
+                Map.of("message_id", message.messageId()));
+        return new InboundEmailResult(null, message.messageId(), InboundOutcome.APPENDED);
     }
 
     private InboundEmailResult createNewTask(InboundEmailRequest request, String customerId, CustomerJtbd customerJtbd) {
@@ -280,6 +308,43 @@ public class InboundEmailService {
                             policyHint,
                             meta);
             documents.add(d);
+        }
+        return documents;
+    }
+
+    private List<DocumentDto> registerEmailAttachments(
+            Conversation conversation, CustomerJtbd customerJtbd, String customerId, InboundEmailRequest request) {
+        if (request.attachments() == null || request.attachments().isEmpty()) {
+            return List.of();
+        }
+        String claimHint = blankToNull(request.claimIdHint());
+        String policyHint = blankToNull(request.policyIdHint());
+        List<DocumentDto> documents = new ArrayList<>();
+        for (InboundEmailAttachment a : request.attachments()) {
+            Map<String, Object> meta = new HashMap<>();
+            if (a.fileName() != null) {
+                meta.put("file_name", a.fileName());
+            }
+            if (a.mimeType() != null) {
+                meta.put("mime_type", a.mimeType());
+            }
+            addDriveMetadata(meta, a.fileUrl());
+            meta.put("source", "email_inbound");
+            String docType =
+                    a.documentType() != null && !a.documentType().isBlank()
+                            ? a.documentType()
+                            : "email_attachment";
+            documents.add(documentService.register(
+                    conversation,
+                    customerJtbd,
+                    null,
+                    customerId,
+                    ChannelType.EMAIL,
+                    a.fileUrl(),
+                    docType,
+                    claimHint,
+                    policyHint,
+                    meta));
         }
         return documents;
     }

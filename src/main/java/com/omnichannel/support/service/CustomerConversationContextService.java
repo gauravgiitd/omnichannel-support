@@ -28,11 +28,27 @@ public class CustomerConversationContextService {
                 .filter(value -> value != null && !value.isBlank());
     }
 
+    @Transactional(readOnly = true)
+    public Optional<String> activeCustomerJtbdPublicId(String customerId, ChannelType channel) {
+        return repository.findByCustomerIdAndChannel(customerId, channel)
+                .map(CustomerConversationContext::getActiveCustomerJtbdPublicId)
+                .filter(value -> value != null && !value.isBlank());
+    }
+
     @Transactional
     public void setActiveTask(String customerId, ChannelType channel, String taskNumber) {
         CustomerConversationContext context = loadOrCreate(customerId, channel);
         context.setActiveTaskNumber(taskNumber);
-        context.setActiveCustomerJtbdPublicId(null);
+        context.setPendingSelectionType(null);
+        context.setPendingOptionsJson(null);
+        repository.save(context);
+    }
+
+    @Transactional
+    public void setActiveJtbd(String customerId, ChannelType channel, String customerJtbdPublicId) {
+        CustomerConversationContext context = loadOrCreate(customerId, channel);
+        context.setActiveTaskNumber(null);
+        context.setActiveCustomerJtbdPublicId(customerJtbdPublicId);
         context.setPendingSelectionType(null);
         context.setPendingOptionsJson(null);
         repository.save(context);
@@ -42,6 +58,14 @@ public class CustomerConversationContextService {
     public void clearActiveTask(String customerId, ChannelType channel) {
         repository.findByCustomerIdAndChannel(customerId, channel).ifPresent(context -> {
             context.setActiveTaskNumber(null);
+            repository.save(context);
+        });
+    }
+
+    @Transactional
+    public void clearActiveJtbd(String customerId, ChannelType channel) {
+        repository.findByCustomerIdAndChannel(customerId, channel).ifPresent(context -> {
+            context.setActiveCustomerJtbdPublicId(null);
             repository.save(context);
         });
     }

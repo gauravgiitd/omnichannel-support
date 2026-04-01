@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.omnichannel.support.domain.ChannelType;
+import com.omnichannel.support.domain.Conversation;
+import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.Message;
 import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Task;
@@ -28,7 +30,32 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public List<MessageDto> listTimeline(Task task) {
-        return messageRepository.findByTaskOrderByCreatedAtAsc(task).stream()
+        if (task.getConversation() == null) {
+            return messageRepository.findByTaskOrderByCreatedAtAsc(task).stream()
+                    .map(this::toDto)
+                    .collect(Collectors.toList());
+        }
+        return listTimeline(task.getConversation());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageDto> listTimeline(Conversation conversation) {
+        return messageRepository.findByConversationOrderByCreatedAtAsc(conversation).stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageDto> listTimeline(Conversation conversation, CustomerJtbd customerJtbd) {
+        if (conversation == null) {
+            return List.of();
+        }
+        if (customerJtbd == null) {
+            return listTimeline(conversation);
+        }
+        return messageRepository.findByConversationOrderByCreatedAtAsc(conversation).stream()
+                .filter(message -> message.getCustomerJtbd() == null
+                        || message.getCustomerJtbd().getId().equals(customerJtbd.getId()))
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
@@ -43,8 +70,35 @@ public class ConversationService {
             List<String> attachmentUrls,
             String externalThreadRef,
             Map<String, Object> metadata) {
+        return appendMessage(
+                task.getConversation(),
+                task.getCustomerJtbd(),
+                task,
+                channel,
+                senderType,
+                senderIdentifier,
+                body,
+                attachmentUrls,
+                externalThreadRef,
+                metadata);
+    }
+
+    @Transactional
+    public MessageDto appendMessage(
+            Conversation conversation,
+            CustomerJtbd customerJtbd,
+            Task task,
+            ChannelType channel,
+            SenderType senderType,
+            String senderIdentifier,
+            String body,
+            List<String> attachmentUrls,
+            String externalThreadRef,
+            Map<String, Object> metadata) {
         Message message = new Message();
         message.setPublicId(UUID.randomUUID().toString());
+        message.setConversation(conversation);
+        message.setCustomerJtbd(customerJtbd);
         message.setTask(task);
         message.setChannel(channel);
         message.setSenderType(senderType);
@@ -63,7 +117,10 @@ public class ConversationService {
         if ((fileUrls == null || fileUrls.isEmpty()) && (attachmentIds == null || attachmentIds.isEmpty())) {
             return;
         }
-        List<Message> messages = messageRepository.findByTaskOrderByCreatedAtAsc(task);
+        List<Message> messages =
+                task.getConversation() != null
+                        ? messageRepository.findByConversationOrderByCreatedAtAsc(task.getConversation())
+                        : messageRepository.findByTaskOrderByCreatedAtAsc(task);
         if (messages.isEmpty()) {
             return;
         }
@@ -83,7 +140,7 @@ public class ConversationService {
         java.util.Map<String, Object> meta = parseObjectMap(message.getMetadataJson());
         return new MessageDto(
                 message.getPublicId(),
-                message.getTask().getTaskNumber(),
+                message.getTask() != null ? message.getTask().getTaskNumber() : null,
                 message.getChannel(),
                 message.getSenderType(),
                 message.getSenderIdentifier(),

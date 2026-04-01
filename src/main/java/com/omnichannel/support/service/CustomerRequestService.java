@@ -1,6 +1,7 @@
 package com.omnichannel.support.service;
 
 import com.omnichannel.support.domain.ChannelType;
+import com.omnichannel.support.domain.Conversation;
 import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.JtbdInstanceStatus;
 import com.omnichannel.support.domain.SenderType;
@@ -41,6 +42,7 @@ public class CustomerRequestService {
     private final TaskService taskService;
     private final CustomerJtbdRepository customerJtbdRepository;
     private final JtbdService jtbdService;
+    private final CustomerConversationService customerConversationService;
     private final ConversationService conversationService;
     private final DocumentService documentService;
 
@@ -59,18 +61,14 @@ public class CustomerRequestService {
 
     @Transactional(readOnly = true)
     public List<MessageDto> listMessages(String customerId, String requestId) {
-        return resolveRequest(customerId, requestId).tasks.stream()
-                .flatMap(task -> conversationService.listTimeline(task).stream())
-                .sorted(Comparator.comparing(MessageDto::createdAt))
-                .toList();
+        RequestAggregate aggregate = resolveRequest(customerId, requestId);
+        return conversationService.listTimeline(aggregate.conversation, aggregate.customerJtbd);
     }
 
     @Transactional(readOnly = true)
     public List<DocumentDto> listDocuments(String customerId, String requestId) {
-        return resolveRequest(customerId, requestId).tasks.stream()
-                .flatMap(task -> documentService.listByTask(task).stream())
-                .sorted(Comparator.comparing(DocumentDto::createdAt))
-                .toList();
+        RequestAggregate aggregate = resolveRequest(customerId, requestId);
+        return documentService.listByConversation(aggregate.conversation, aggregate.customerJtbd);
     }
 
     @Transactional
@@ -96,73 +94,83 @@ public class CustomerRequestService {
     @Transactional
     public MessageDto postMessage(String customerId, String customerEmail, String requestId, PostMessageRequest request) {
         RequestAggregate aggregate = resolveRequest(customerId, requestId);
-        Task target = ensureWritableTask(aggregate, customerEmail, request.body(), request.channel());
-        return taskService.postMessage(
-                target.getTaskNumber(),
-                new PostMessageRequest(
-                        request.channel(),
-                        SenderType.CUSTOMER,
-                        customerEmail,
-                        request.body(),
-                        request.attachmentUrls(),
-                        request.externalThreadRef(),
-                        request.metadata()));
+        Task target = latestOpenTask(aggregate);
+        if (target != null) {
+            return taskService.postMessage(
+                    target.getTaskNumber(),
+                    new PostMessageRequest(
+                            request.channel(),
+                            SenderType.CUSTOMER,
+                            customerEmail,
+                            request.body(),
+                            request.attachmentUrls(),
+                            request.externalThreadRef(),
+                            request.metadata()));
+        }
+        return conversationService.appendMessage(
+                aggregate.conversation,
+                aggregate.customerJtbd,
+                null,
+                request.channel(),
+                SenderType.CUSTOMER,
+                customerEmail,
+                request.body(),
+                request.attachmentUrls(),
+                request.externalThreadRef(),
+                request.metadata());
     }
 
     @Transactional
     public DocumentDto registerDocument(
             String customerId, String customerEmail, String requestId, RegisterDocumentRequest request) {
         RequestAggregate aggregate = resolveRequest(customerId, requestId);
-        Task target = ensureWritableTask(
-                aggregate,
+        Task target = latestOpenTask(aggregate);
+        if (target != null) {
+            return taskService.registerDocument(
+                    target.getTaskNumber(),
+                    new RegisterDocumentRequest(
+                            request.channel(),
+                            SenderType.CUSTOMER,
+                            customerEmail,
+                            request.fileUrl(),
+                            request.documentType(),
+                            request.claimId(),
+                            request.policyId(),
+                            request.messageBody(),
+                            request.metadata()));
+        }
+        DocumentDto doc = documentService.register(
+                aggregate.conversation,
+                aggregate.customerJtbd,
+                null,
+                customerId,
+                request.channel(),
+                request.fileUrl(),
+                request.documentType(),
+                request.claimId(),
+                request.policyId(),
+                request.metadata());
+        conversationService.appendMessage(
+                aggregate.conversation,
+                aggregate.customerJtbd,
+                null,
+                request.channel(),
+                SenderType.CUSTOMER,
                 customerEmail,
                 request.messageBody() != null && !request.messageBody().isBlank()
                         ? request.messageBody()
                         : "Customer shared a document about this request.",
-                request.channel());
-        return taskService.registerDocument(
-                target.getTaskNumber(),
-                new RegisterDocumentRequest(
-                        request.channel(),
-                        SenderType.CUSTOMER,
-                        customerEmail,
-                        request.fileUrl(),
-                        request.documentType(),
-                        request.claimId(),
-                        request.policyId(),
-                        request.messageBody(),
-                        request.metadata()));
+                List.of(doc.fileUrl()),
+                null,
+                Map.of("attachment_ids", List.of(doc.documentId())));
+        return doc;
     }
 
-    private Task ensureWritableTask(
-            RequestAggregate aggregate, String customerEmail, String initialBody, ChannelType channel) {
-        Optional<Task> openTask = aggregate.tasks.stream()
+    private Task latestOpenTask(RequestAggregate aggregate) {
+        return aggregate.tasks.stream()
                 .filter(task -> !isClosed(task.getStatus()))
-                .max(Comparator.comparing(Task::getCreatedAt));
-        if (openTask.isPresent()) {
-            return openTask.get();
-        }
-        if (aggregate.customerJtbd == null || aggregate.customerJtbd.getStatus() == JtbdInstanceStatus.COMPLETED) {
-            return aggregate.tasks.stream()
-                    .max(Comparator.comparing(Task::getCreatedAt))
-                    .orElseThrow(() -> new ValidationException("request has no available internal task"));
-        }
-
-        CreateTaskRequest createTaskRequest = new CreateTaskRequest(
-                aggregate.customerId,
-                toIssueType(aggregate.title),
-                null,
-                null,
-                null,
-                TaskPriority.MEDIUM,
-                channel,
-                initialBody,
-                customerEmail,
-                Map.of("source", "customer_request_follow_up"),
-                "request-" + System.currentTimeMillis());
-        var createdTask = taskService.createTask(createTaskRequest, aggregate.customerJtbd);
-        return taskRepository.findByTaskNumber(createdTask.taskId())
-                .orElseThrow(() -> new NotFoundException("internal task not found after create"));
+                .max(Comparator.comparing(Task::getCreatedAt))
+                .orElse(null);
     }
 
     private RequestAggregate resolveRequest(String customerId, String requestId) {
@@ -177,7 +185,7 @@ public class CustomerRequestService {
                     taskRepository.findByCustomerJtbdIdOrderByCreatedAtDesc(customerJtbd.getId()),
                     task -> task.getCustomerJtbd() != null
                             && task.getCustomerJtbd().getId().equals(customerJtbd.getId()));
-            return RequestAggregate.forJtbd(customerJtbd, tasks);
+            return RequestAggregate.forJtbd(customerJtbd, tasks, conversationFor(customerId));
         }
 
         String taskNumber = CustomerRequestIds.extractReference(requestId);
@@ -188,7 +196,7 @@ public class CustomerRequestService {
         if (task.getCustomerJtbd() != null) {
             return resolveRequest(customerId, CustomerRequestIds.forJtbd(task.getCustomerJtbd()));
         }
-        return RequestAggregate.forStandaloneTask(task);
+        return RequestAggregate.forStandaloneTask(task, conversationFor(customerId));
     }
 
     private Map<String, RequestAggregate> groupedRequests(String customerId) {
@@ -196,20 +204,27 @@ public class CustomerRequestService {
         for (Task task : canonicalTasks(taskRepository.findByCustomerIdOrderByCreatedAtDesc(customerId), any())) {
             if (task.getCustomerJtbd() != null) {
                 String requestId = CustomerRequestIds.forJtbd(task.getCustomerJtbd());
-                grouped.computeIfAbsent(requestId, ignored -> RequestAggregate.forJtbd(task.getCustomerJtbd(), new ArrayList<>()))
+                grouped.computeIfAbsent(
+                                requestId,
+                                ignored -> RequestAggregate.forJtbd(
+                                        task.getCustomerJtbd(), new ArrayList<>(), task.getConversation()))
                         .tasks.add(task);
             } else {
                 String requestId = CustomerRequestIds.forTask(task);
-                grouped.putIfAbsent(requestId, RequestAggregate.forStandaloneTask(task));
+                grouped.putIfAbsent(requestId, RequestAggregate.forStandaloneTask(task, task.getConversation()));
             }
         }
 
         for (CustomerJtbd customerJtbd : customerJtbdRepository.findByCustomerIdOrderByCreatedAtDesc(customerId)) {
             grouped.computeIfAbsent(
                     CustomerRequestIds.forJtbd(customerJtbd),
-                    ignored -> RequestAggregate.forJtbd(customerJtbd, new ArrayList<>()));
+                    ignored -> RequestAggregate.forJtbd(customerJtbd, new ArrayList<>(), conversationFor(customerId)));
         }
         return grouped;
+    }
+
+    private Conversation conversationFor(String customerId) {
+        return customerConversationService.findByCustomerId(customerId);
     }
 
     private List<Task> canonicalTasks(List<Task> rawTasks, Predicate<Task> includeFilter) {
@@ -265,34 +280,43 @@ public class CustomerRequestService {
         private final String requestId;
         private final String customerId;
         private final String title;
+        private final Conversation conversation;
         private final CustomerJtbd customerJtbd;
         private final List<Task> tasks;
 
         private RequestAggregate(
-                String requestId, String customerId, String title, CustomerJtbd customerJtbd, List<Task> tasks) {
+                String requestId,
+                String customerId,
+                String title,
+                Conversation conversation,
+                CustomerJtbd customerJtbd,
+                List<Task> tasks) {
             this.requestId = requestId;
             this.customerId = customerId;
             this.title = title;
+            this.conversation = conversation;
             this.customerJtbd = customerJtbd;
             this.tasks = tasks;
         }
 
-        static RequestAggregate forJtbd(CustomerJtbd customerJtbd, List<Task> tasks) {
+        static RequestAggregate forJtbd(CustomerJtbd customerJtbd, List<Task> tasks, Conversation conversation) {
             return new RequestAggregate(
                     CustomerRequestIds.forJtbd(customerJtbd),
                     customerJtbd.getCustomerId(),
                     customerJtbd.getJtbdType().getName(),
+                    conversation,
                     customerJtbd,
                     tasks);
         }
 
-        static RequestAggregate forStandaloneTask(Task task) {
+        static RequestAggregate forStandaloneTask(Task task, Conversation conversation) {
             List<Task> tasks = new ArrayList<>();
             tasks.add(task);
             return new RequestAggregate(
                     CustomerRequestIds.forTask(task),
                     task.getCustomerId(),
                     titleForTask(task),
+                    conversation,
                     null,
                     tasks);
         }

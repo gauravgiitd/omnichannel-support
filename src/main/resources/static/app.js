@@ -2,10 +2,13 @@ const STORAGE_KEYS = {
     taskId: "omnichannel.taskId",
     requestId: "omnichannel.requestId"
 };
+const AUTO_REFRESH_MS = 15000;
 
 const customerUrlParams = new URLSearchParams(window.location.search);
 const requestFromUrl = customerUrlParams.get("request");
 const legacyTaskFromUrl = customerUrlParams.get("task");
+let autoRefreshHandle = null;
+let autoRefreshInFlight = false;
 
 const state = {
     view: "landing",
@@ -40,9 +43,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     syncUserIdentity();
     if (state.view === "jtbd") {
         await refreshJtbdDashboard();
+        startAutoRefresh();
         return;
     }
     await refreshBoard();
+    startAutoRefresh();
+});
+
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+        void runAutoRefresh();
+    }
 });
 
 function setupTabs() {
@@ -347,6 +358,38 @@ async function refreshJtbdDashboard() {
     populateJtbdSelects();
     renderJtbdTypes();
     renderJtbdCustomers();
+}
+
+function startAutoRefresh() {
+    if (autoRefreshHandle || state.view === "landing" || state.view === "login") {
+        return;
+    }
+    autoRefreshHandle = window.setInterval(() => {
+        void runAutoRefresh();
+    }, AUTO_REFRESH_MS);
+}
+
+async function runAutoRefresh() {
+    if (autoRefreshInFlight || document.hidden) {
+        return;
+    }
+    autoRefreshInFlight = true;
+    try {
+        if (state.view === "admin") {
+            await refreshAdminDashboard();
+            return;
+        }
+        if (state.view === "jtbd") {
+            await refreshJtbdDashboard();
+            return;
+        }
+        const preferredId = state.view === "customer" ? state.selectedRequestId : state.selectedTaskId;
+        await refreshBoard(preferredId);
+    } catch (error) {
+        console.warn("Auto-refresh failed", error);
+    } finally {
+        autoRefreshInFlight = false;
+    }
 }
 
 function findRelevantTaskId() {

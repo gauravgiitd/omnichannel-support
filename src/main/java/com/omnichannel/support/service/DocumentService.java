@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.omnichannel.support.domain.ChannelType;
+import com.omnichannel.support.domain.Conversation;
+import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.Task;
 import com.omnichannel.support.domain.TaskDocument;
 import com.omnichannel.support.dto.DocumentDto;
@@ -28,7 +30,26 @@ public class DocumentService {
 
     @Transactional(readOnly = true)
     public List<DocumentDto> listByTask(Task task) {
+        if (task.getConversation() != null) {
+            return listByConversation(task.getConversation(), task.getCustomerJtbd());
+        }
         return taskDocumentRepository.findByTaskOrderByCreatedAtAsc(task).stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<DocumentDto> listByConversation(Conversation conversation, CustomerJtbd customerJtbd) {
+        if (conversation == null) {
+            return List.of();
+        }
+        if (customerJtbd == null) {
+            return taskDocumentRepository.findByConversationOrderByCreatedAtAsc(conversation).stream()
+                    .map(this::toDto)
+                    .collect(Collectors.toList());
+        }
+        return taskDocumentRepository.findByConversationOrderByCreatedAtAsc(conversation).stream()
+                .filter(doc -> doc.getCustomerJtbd() == null || doc.getCustomerJtbd().getId().equals(customerJtbd.getId()))
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
@@ -43,12 +64,29 @@ public class DocumentService {
             String claimId,
             String policyId,
             Map<String, Object> metadata) {
+        return register(task.getConversation(), task.getCustomerJtbd(), task, customerId, sourceChannel, fileUrl, documentType, claimId, policyId, metadata);
+    }
+
+    @Transactional
+    public DocumentDto register(
+            Conversation conversation,
+            CustomerJtbd customerJtbd,
+            Task task,
+            String customerId,
+            ChannelType sourceChannel,
+            String fileUrl,
+            String documentType,
+            String claimId,
+            String policyId,
+            Map<String, Object> metadata) {
         Map<String, Object> resolvedMetadata = metadata != null ? new HashMap<>(metadata) : new HashMap<>();
         moveDriveFileToCustomerFolder(customerId, resolvedMetadata);
 
         TaskDocument doc = new TaskDocument();
         String publicId = UUID.randomUUID().toString();
         doc.setPublicId(publicId);
+        doc.setConversation(conversation);
+        doc.setCustomerJtbd(customerJtbd);
         doc.setTask(task);
         doc.setCustomerId(customerId);
         doc.setClaimId(blankToNull(claimId));
@@ -66,7 +104,7 @@ public class DocumentService {
                 "SYSTEM",
                 "document-service",
                 Map.of(
-                        "task", task.getTaskNumber(),
+                        "task", task != null ? task.getTaskNumber() : "",
                         "channel", sourceChannel.name()));
 
         return toDto(saved);
@@ -110,7 +148,7 @@ public class DocumentService {
     private DocumentDto toDto(TaskDocument doc) {
         return new DocumentDto(
                 doc.getPublicId(),
-                doc.getTask().getTaskNumber(),
+                doc.getTask() != null ? doc.getTask().getTaskNumber() : null,
                 doc.getCustomerId(),
                 doc.getClaimId(),
                 doc.getPolicyId(),

@@ -10,20 +10,20 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface TaskRepository extends JpaRepository<Task, Long> {
 
-    @EntityGraph(attributePaths = {"customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
+    @EntityGraph(attributePaths = {"conversation", "customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
     Optional<Task> findByTaskNumber(String taskNumber);
 
-    @EntityGraph(attributePaths = {"customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
+    @EntityGraph(attributePaths = {"conversation", "customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
     List<Task> findByCustomerIdOrderByCreatedAtDesc(String customerId);
 
-    @EntityGraph(attributePaths = {"customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
+    @EntityGraph(attributePaths = {"conversation", "customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
     List<Task> findByCustomerIdAndStatusInOrderByCreatedAtDesc(
             String customerId, Collection<TaskStatus> statuses);
 
-    @EntityGraph(attributePaths = {"customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
+    @EntityGraph(attributePaths = {"conversation", "customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
     List<Task> findByCustomerJtbdIdAndStatusInOrderByCreatedAtDesc(
             Long customerJtbdId, Collection<TaskStatus> statuses);
 
-    @EntityGraph(attributePaths = {"customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
+    @EntityGraph(attributePaths = {"conversation", "customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
     List<Task> findByCustomerJtbdIdOrderByCreatedAtDesc(Long customerJtbdId);
 }

@@ -1,6 +1,7 @@
 package com.omnichannel.support.service;
 
 import com.omnichannel.support.domain.ChannelType;
+import com.omnichannel.support.domain.Conversation;
 import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.PendingSelectionType;
@@ -40,6 +41,7 @@ public class InboundWhatsAppService {
     private final TaskRepository taskRepository;
     private final TaskResolutionService taskResolutionService;
     private final ConversationService conversationService;
+    private final CustomerConversationService customerConversationService;
     private final TaskService taskService;
     private final DocumentService documentService;
     private final JtbdService jtbdService;
@@ -102,7 +104,8 @@ public class InboundWhatsAppService {
             if (!jtbd.getCustomerId().equals(customerId)) {
                 throw new ValidationException("JTBD does not belong to resolved customer");
             }
-            return createNewTask(request, customerId, jtbd);
+            customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, jtbd.getPublicId());
+            return appendToConversation(customerId, jtbd, request);
         }
 
         Optional<CustomerConversationContextService.PendingSelection> pendingSelection =
@@ -112,19 +115,10 @@ public class InboundWhatsAppService {
             return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        Optional<Task> activeTask = activeContextTask(customerId);
-
-        if (isSwitchToTaskRequest(request.bodyText()) && openTasks.size() > 1) {
-            List<CustomerConversationContextService.SelectionOption> options = buildTaskSelectionOptions(openTasks);
-            customerConversationContextService.setPendingSelection(
-                    customerId, ChannelType.WHATSAPP, PendingSelectionType.TICKET, options);
-            sendSelectionPrompt(request.fromE164Phone(), PendingSelectionType.TICKET, options);
-            return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
-        }
-
         if (isSwitchToJtbdRequest(request.bodyText()) && !activeJtbds.isEmpty()) {
             if (activeJtbds.size() == 1) {
-                return createNewTask(request, customerId, activeJtbds.get(0));
+                customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, activeJtbds.get(0).getPublicId());
+                return appendToConversation(customerId, activeJtbds.get(0), request);
             }
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
@@ -133,35 +127,26 @@ public class InboundWhatsAppService {
             return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        if (activeTask.isPresent()) {
-            return appendToTask(activeTask.get(), customerId, request);
+        Optional<CustomerJtbd> activeJtbd = activeContextJtbd(customerId);
+        if (activeJtbd.isPresent()) {
+            return appendToConversation(customerId, activeJtbd.get(), request);
         }
 
-        List<CustomerConversationContextService.SelectionOption> targetOptions =
-                buildConversationTargetOptions(customerId, openTasks, activeJtbds);
-        if (!directReply && targetOptions.size() > 1) {
-            customerConversationContextService.setPendingSelection(
-                    customerId, ChannelType.WHATSAPP, PendingSelectionType.TARGET, targetOptions);
-            sendSelectionPrompt(request.fromE164Phone(), PendingSelectionType.TARGET, targetOptions);
-            return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
-        }
-
-        if (targetOptions.size() == 1) {
-            String reference = targetOptions.get(0).reference();
-            if (isTaskReference(reference)) {
-                Task task = taskService.loadCanonicalTask(stripReferencePrefix(reference));
-                assertCustomerOwns(customerId, task);
-                customerConversationContextService.setActiveTask(customerId, ChannelType.WHATSAPP, task.getTaskNumber());
-                return appendToTask(task, customerId, request);
+        if (!activeJtbds.isEmpty()) {
+            if (!directReply && activeJtbds.size() > 1) {
+                List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
+                customerConversationContextService.setPendingSelection(
+                        customerId, ChannelType.WHATSAPP, PendingSelectionType.JTBD, options);
+                sendSelectionPrompt(request.fromE164Phone(), PendingSelectionType.JTBD, options);
+                return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
             }
-            CustomerJtbd jtbd = jtbdService.loadCustomerJtbd(stripReferencePrefix(reference));
-            if (!jtbd.getCustomerId().equals(customerId)) {
-                throw new ValidationException("JTBD does not belong to resolved customer");
+            if (activeJtbds.size() == 1) {
+                customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, activeJtbds.get(0).getPublicId());
+                return appendToConversation(customerId, activeJtbds.get(0), request);
             }
-            return createNewTask(request, customerId, jtbd);
         }
 
-        return createNewTask(request, customerId, null);
+        return appendToConversation(customerId, null, request);
     }
 
     private Optional<Task> activeContextTask(String customerId) {
@@ -171,6 +156,12 @@ public class InboundWhatsAppService {
                 .filter(task -> task.getCustomerId().equals(customerId))
                 .filter(task -> taskService.findOpenTasksForCustomer(customerId).stream()
                         .anyMatch(open -> open.getTaskNumber().equals(task.getTaskNumber())));
+    }
+
+    private Optional<CustomerJtbd> activeContextJtbd(String customerId) {
+        return customerConversationContextService.activeCustomerJtbdPublicId(customerId, ChannelType.WHATSAPP)
+                .map(jtbdService::loadCustomerJtbd)
+                .filter(jtbd -> jtbd.getCustomerId().equals(customerId));
     }
 
     private InboundWhatsAppResult appendToTask(Task task, String customerId, InboundWhatsAppRequest request) {
@@ -200,6 +191,47 @@ public class InboundWhatsAppService {
                 "whatsapp-adapter",
                 Map.of("message_id", message.messageId()));
         return new InboundWhatsAppResult(task.getTaskNumber(), message.messageId(), InboundOutcome.APPENDED);
+    }
+
+    private InboundWhatsAppResult appendToConversation(
+            String customerId, CustomerJtbd customerJtbd, InboundWhatsAppRequest request) {
+        Conversation conversation = customerConversationService.getOrCreate(customerId, ChannelType.WHATSAPP);
+        List<DocumentDto> documents = registerWhatsAppDocuments(conversation, customerJtbd, customerId, request);
+        List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
+        List<String> urls = documents.stream().map(DocumentDto::fileUrl).toList();
+        Map<String, Object> metadata = buildWaMetadata(request);
+        if (customerJtbd != null) {
+            metadata.put("customer_jtbd_id", customerJtbd.getPublicId());
+        }
+        if (!docIds.isEmpty()) {
+            metadata.put("attachment_ids", docIds);
+        }
+        MessageDto message =
+                conversationService.appendMessage(
+                        conversation,
+                        customerJtbd,
+                        null,
+                        ChannelType.WHATSAPP,
+                        SenderType.CUSTOMER,
+                        request.fromE164Phone(),
+                        request.bodyText(),
+                        urls,
+                        request.waMessageId(),
+                        metadata);
+        if (customerJtbd != null) {
+            customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, customerJtbd.getPublicId());
+        } else {
+            customerConversationContextService.clearActiveTask(customerId, ChannelType.WHATSAPP);
+            customerConversationContextService.clearActiveJtbd(customerId, ChannelType.WHATSAPP);
+        }
+        auditService.record(
+                "INBOUND_WHATSAPP_CONVERSATION_APPENDED",
+                "Conversation",
+                conversation.getPublicId(),
+                "SYSTEM",
+                "whatsapp-adapter",
+                Map.of("message_id", message.messageId()));
+        return new InboundWhatsAppResult(null, message.messageId(), InboundOutcome.APPENDED);
     }
 
     private InboundWhatsAppResult createNewTask(
@@ -300,10 +332,10 @@ public class InboundWhatsAppService {
             return false;
         }
         String normalized = body.toUpperCase(java.util.Locale.ROOT);
-        return normalized.contains("SWITCH TICKET")
-                || normalized.contains("CHANGE TICKET")
-                || normalized.contains("ANOTHER TICKET")
-                || normalized.contains("DIFFERENT TICKET");
+        return normalized.contains("SWITCH REQUEST")
+                || normalized.contains("CHANGE REQUEST")
+                || normalized.contains("ANOTHER REQUEST")
+                || normalized.contains("DIFFERENT REQUEST");
     }
 
     private static boolean isSwitchToJtbdRequest(String body) {
@@ -324,12 +356,10 @@ public class InboundWhatsAppService {
             return false;
         }
         String normalized = body.trim().toUpperCase(java.util.Locale.ROOT);
-        return normalized.equals("NEW TICKET")
-                || normalized.equals("NEW ISSUE")
-                || normalized.equals("CREATE TICKET")
-                || normalized.startsWith("NEW TICKET ")
-                || normalized.startsWith("NEW ISSUE ")
-                || normalized.startsWith("CREATE TICKET ");
+        return normalized.equals("NEW REQUEST")
+                || normalized.equals("CREATE REQUEST")
+                || normalized.startsWith("NEW REQUEST ")
+                || normalized.startsWith("CREATE REQUEST ");
     }
 
     private static List<CustomerConversationContextService.SelectionOption> buildTaskSelectionOptions(List<Task> openTasks) {
@@ -344,7 +374,7 @@ public class InboundWhatsAppService {
             }
             options.add(new CustomerConversationContextService.SelectionOption(
                     i + 1,
-                    "TICKET:" + task.getTaskNumber(),
+                    "TASK:" + task.getTaskNumber(),
                     label));
         }
         return options;
@@ -445,7 +475,7 @@ public class InboundWhatsAppService {
     }
 
     private static boolean isTaskReference(String reference) {
-        return reference != null && reference.startsWith("TICKET:");
+        return reference != null && reference.startsWith("TASK:");
     }
 
     private static boolean isStandaloneReference(String reference) {
@@ -522,6 +552,44 @@ public class InboundWhatsAppService {
                             policyHint,
                             meta);
             documents.add(d);
+        }
+        return documents;
+    }
+
+    private List<DocumentDto> registerWhatsAppDocuments(
+            Conversation conversation, CustomerJtbd customerJtbd, String customerId, InboundWhatsAppRequest request) {
+        if (request.attachmentUrls() == null || request.attachmentUrls().isEmpty()) {
+            return List.of();
+        }
+        String claimHint = blankToNull(request.claimIdHint());
+        String policyHint = blankToNull(request.policyIdHint());
+        List<DocumentDto> documents = new ArrayList<>();
+        int index = 0;
+        for (String url : request.attachmentUrls()) {
+            Map<String, Object> meta = new HashMap<>();
+            meta.put("source", "whatsapp_inbound");
+            meta.put("attachment_index", index++);
+            DriveFileToken token = DriveFileToken.parse(url);
+            if (token != null) {
+                meta.put("drive_file_id", token.fileId());
+                if (token.fileName() != null && !token.fileName().isBlank()) {
+                    meta.put("file_name", token.fileName());
+                }
+                if (token.mimeType() != null && !token.mimeType().isBlank()) {
+                    meta.put("mime_type", token.mimeType());
+                }
+            }
+            documents.add(documentService.register(
+                    conversation,
+                    customerJtbd,
+                    null,
+                    customerId,
+                    ChannelType.WHATSAPP,
+                    url,
+                    "whatsapp_attachment",
+                    claimHint,
+                    policyHint,
+                    meta));
         }
         return documents;
     }

@@ -2,12 +2,14 @@ package com.omnichannel.support.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.omnichannel.support.domain.Conversation;
 import com.omnichannel.support.domain.CustomerIdentityLink;
 import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.Task;
 import com.omnichannel.support.domain.TaskDocument;
 import com.omnichannel.support.error.NotFoundException;
 import com.omnichannel.support.repo.AuditLogRepository;
+import com.omnichannel.support.repo.ConversationRepository;
 import com.omnichannel.support.repo.CustomerContactMappingRepository;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import com.omnichannel.support.repo.MessageRepository;
@@ -30,6 +32,7 @@ public class AdminCleanupService {
     private final TaskDocumentRepository taskDocumentRepository;
     private final MessageRepository messageRepository;
     private final TaskMergeMapRepository taskMergeMapRepository;
+    private final ConversationRepository conversationRepository;
     private final CustomerContactMappingRepository customerContactMappingRepository;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
     private final AuditLogRepository auditLogRepository;
@@ -81,6 +84,7 @@ public class AdminCleanupService {
         taskMergeMapRepository.deleteAllInBatch();
         customerIdentityLinkRepository.deleteAllInBatch();
         taskRepository.deleteAllInBatch();
+        conversationRepository.deleteAllInBatch();
 
         return new CleanupResult(
                 taskCount,
@@ -100,6 +104,9 @@ public class AdminCleanupService {
         List<Task> tasks = normalizedCustomerId == null || normalizedCustomerId.isBlank()
                 ? List.of()
                 : taskRepository.findByCustomerIdOrderByCreatedAtDesc(normalizedCustomerId);
+        Conversation conversation = normalizedCustomerId == null || normalizedCustomerId.isBlank()
+                ? null
+                : conversationRepository.findByCustomerId(normalizedCustomerId).orElse(null);
         List<CustomerIdentityLink> identityLinks = normalizedCustomerId == null || normalizedCustomerId.isBlank()
                 ? List.of()
                 : customerIdentityLinkRepository.findByCustomerId(normalizedCustomerId);
@@ -119,12 +126,16 @@ public class AdminCleanupService {
                 .filter(mapping -> emails.contains(mapping.getEmail()) || phones.contains(mapping.getPhone()))
                 .toList();
 
-        if (tasks.isEmpty() && identityLinks.isEmpty()) {
+        if (tasks.isEmpty() && identityLinks.isEmpty() && conversation == null) {
             throw new NotFoundException("no customer data found for " + normalizedCustomerId);
         }
 
-        List<TaskDocument> documents = tasks.isEmpty() ? List.of() : taskDocumentRepository.findByTaskIn(tasks);
-        List<com.omnichannel.support.domain.Message> messages = tasks.isEmpty() ? List.of() : messageRepository.findByTaskIn(tasks);
+        List<TaskDocument> documents = conversation != null
+                ? taskDocumentRepository.findByConversationOrderByCreatedAtAsc(conversation)
+                : tasks.isEmpty() ? List.of() : taskDocumentRepository.findByTaskIn(tasks);
+        List<com.omnichannel.support.domain.Message> messages = conversation != null
+                ? messageRepository.findByConversationOrderByCreatedAtAsc(conversation)
+                : tasks.isEmpty() ? List.of() : messageRepository.findByTaskIn(tasks);
         List<com.omnichannel.support.domain.TaskMergeMap> merges = tasks.isEmpty()
                 ? List.of()
                 : taskMergeMapRepository.findByPrimaryTaskInOrMergedTaskIn(tasks, tasks);
@@ -186,6 +197,9 @@ public class AdminCleanupService {
         }
         if (!tasks.isEmpty()) {
             taskRepository.deleteAllInBatch(tasks);
+        }
+        if (conversation != null) {
+            conversationRepository.delete(conversation);
         }
 
         return new CustomerCleanupResult(

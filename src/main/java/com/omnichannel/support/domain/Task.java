@@ -33,6 +33,10 @@ public class Task {
     @Column(name = "customer_id", nullable = false, length = 64)
     private String customerId;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "conversation_id")
+    private Conversation conversation;
+
     @Column(name = "issue_type", nullable = false, length = 128)
     private String issueType;
 

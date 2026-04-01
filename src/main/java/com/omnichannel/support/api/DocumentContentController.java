@@ -33,7 +33,11 @@ public class DocumentContentController {
     public ResponseEntity<byte[]> content(
             @PathVariable("documentId") String documentId, Authentication authentication) throws Exception {
         TaskDocument document = documentService.getByPublicId(documentId);
-        taskAccessService.assertCanAccessTask(authentication, document.getTask().getTaskNumber());
+        if (document.getTask() != null) {
+            taskAccessService.assertCanAccessTask(authentication, document.getTask().getTaskNumber());
+        } else {
+            taskAccessService.assertCanAccessCustomer(authentication, document.getCustomerId());
+        }
 
         Map<String, Object> metadata = parseMetadata(document.getMetadataJson());
         String driveFileId = stringValue(metadata.get("drive_file_id"));

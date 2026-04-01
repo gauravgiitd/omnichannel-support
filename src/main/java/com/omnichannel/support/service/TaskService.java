@@ -43,6 +43,7 @@ public class TaskService {
     private final TaskRepository taskRepository;
     private final TaskMergeMapRepository taskMergeMapRepository;
     private final TaskNumberGenerator taskNumberGenerator;
+    private final CustomerConversationService customerConversationService;
     private final ConversationService conversationService;
     private final TaskResolutionService taskResolutionService;
     private final AuditService auditService;
@@ -61,6 +62,7 @@ public class TaskService {
         Task task = new Task();
         task.setTaskNumber(taskNumberGenerator.newTaskNumber());
         task.setCustomerId(request.customerId());
+        task.setConversation(customerConversationService.getOrCreate(request.customerId(), request.sourceChannel()));
         task.setCustomerJtbd(customerJtbd);
         task.setIssueType(request.issueType().trim());
         task.setLob(blankToNull(request.lob()));
