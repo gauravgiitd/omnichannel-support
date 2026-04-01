@@ -712,8 +712,8 @@ function renderCustomerExperience() {
         return;
     }
     if (!state.currentRequest) {
-        customerHeading.textContent = "Your requests";
-        text("customerAppSubhead", "Click any request below to expand its full conversation and continue the journey.");
+        customerHeading.textContent = "Your support conversation";
+        text("customerAppSubhead", "Your customer journey now stays in one continuous thread across app, email, and WhatsApp.");
         text("customerStatusPill", "Ready");
         return;
     }
@@ -733,10 +733,10 @@ function renderCustomerTaskList() {
         return;
     }
     const requests = state.customerRequests || [];
-    text("customerTaskCount", `${requests.length} request${requests.length === 1 ? "" : "s"}`);
+    text("customerTaskCount", `${requests.length} conversation${requests.length === 1 ? "" : "s"}`);
     if (!requests.length) {
         container.className = "queue-stack empty-state";
-        container.textContent = "No requests yet.";
+        container.textContent = "No conversation yet.";
         return;
     }
     container.className = "queue-stack";
@@ -783,16 +783,16 @@ function renderCustomerTaskAccordion(request) {
                     <div class="bubble-meta">
                         <span class="badge">${escapeHtml(request.stage_label || "Open")}</span>
                         <span class="badge">${request.source_channel}</span>
-                        ${request.jtbd_backed ? `<span class="badge">JTBD</span>` : `<span class="badge">Request</span>`}
+                        <span class="badge">Conversation</span>
                     </div>
-                    <p class="task-supporting">${request.jtbd_type_name || "General support request"} • ${request.internal_task_count} internal work item${request.internal_task_count === 1 ? "" : "s"}</p>
+                    <p class="task-supporting">${request.jtbd_type_name || "Shared customer thread"} • ${request.internal_task_count} internal work item${request.internal_task_count === 1 ? "" : "s"}</p>
                 </div>
                 <span class="customer-task-chevron">${active ? "Hide" : "Open"}</span>
             </button>
             ${active ? `
                 <div class="customer-task-body" data-task-body="${request.request_id}">
                     <div class="customer-task-details">
-                        <span class="badge">Request stage ${escapeHtml(request.stage_label || "Open")}</span>
+                        <span class="badge">Conversation ${escapeHtml(request.stage_label || "Open")}</span>
                         <span class="badge">Status ${escapeHtml(request.status_label || "Active")}</span>
                         ${request.jtbd_type_name ? `<span class="badge">${escapeHtml(request.jtbd_type_name)}</span>` : ""}
                     </div>
@@ -800,14 +800,14 @@ function renderCustomerTaskAccordion(request) {
                     <form id="customerComposeForm" class="stack-form compact customer-compose-form">
                         <label>
                             Message
-                            <textarea name="body" rows="4" required>I want to continue on this same request.</textarea>
+                            <textarea name="body" rows="4" required>I want to continue on this same conversation.</textarea>
                         </label>
                         <label>
                             Attach documents
                             <input name="attachments" type="file" multiple>
                         </label>
-                        <p class="small-note">For email responses, reply directly from your inbox and we will keep everything on this same request.</p>
-                        <button type="submit">Send update to this request</button>
+                        <p class="small-note">For email responses, reply directly from your inbox and we will keep everything in this same conversation.</p>
+                        <button type="submit">Send update to this conversation</button>
                     </form>
                 </div>
             ` : ""}

@@ -22,7 +22,6 @@ import com.omnichannel.support.repo.TaskMergeMapRepository;
 import com.omnichannel.support.repo.TaskRepository;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -48,10 +47,11 @@ public class CustomerRequestService {
 
     @Transactional(readOnly = true)
     public List<CustomerRequestDto> listRequestsForCustomer(String customerId) {
-        return groupedRequests(customerId).values().stream()
-                .map(RequestAggregate::toDto)
-                .sorted(Comparator.comparing(CustomerRequestDto::updatedAt).reversed())
-                .toList();
+        Conversation conversation = conversationFor(customerId);
+        if (conversation == null) {
+            return List.of();
+        }
+        return List.of(buildConversationAggregate(customerId, conversation).toDto());
     }
 
     @Transactional(readOnly = true)
@@ -174,6 +174,13 @@ public class CustomerRequestService {
     }
 
     private RequestAggregate resolveRequest(String customerId, String requestId) {
+        if (CustomerRequestIds.isConversationRequest(requestId)) {
+            Conversation conversation = conversationFor(customerId);
+            if (conversation == null || !conversation.getPublicId().equals(CustomerRequestIds.extractReference(requestId))) {
+                throw new NotFoundException("request not found");
+            }
+            return buildConversationAggregate(customerId, conversation);
+        }
         if (CustomerRequestIds.isJtbdRequest(requestId)) {
             String jtbdPublicId = CustomerRequestIds.extractReference(requestId);
             CustomerJtbd customerJtbd = customerJtbdRepository.findByPublicId(jtbdPublicId)
@@ -196,31 +203,21 @@ public class CustomerRequestService {
         if (task.getCustomerJtbd() != null) {
             return resolveRequest(customerId, CustomerRequestIds.forJtbd(task.getCustomerJtbd()));
         }
-        return RequestAggregate.forStandaloneTask(task, conversationFor(customerId));
+        Conversation conversation = conversationFor(customerId);
+        if (conversation != null) {
+            return buildConversationAggregate(customerId, conversation);
+        }
+        return RequestAggregate.forStandaloneTask(task, null);
     }
 
-    private Map<String, RequestAggregate> groupedRequests(String customerId) {
-        Map<String, RequestAggregate> grouped = new LinkedHashMap<>();
-        for (Task task : canonicalTasks(taskRepository.findByCustomerIdOrderByCreatedAtDesc(customerId), any())) {
-            if (task.getCustomerJtbd() != null) {
-                String requestId = CustomerRequestIds.forJtbd(task.getCustomerJtbd());
-                grouped.computeIfAbsent(
-                                requestId,
-                                ignored -> RequestAggregate.forJtbd(
-                                        task.getCustomerJtbd(), new ArrayList<>(), task.getConversation()))
-                        .tasks.add(task);
-            } else {
-                String requestId = CustomerRequestIds.forTask(task);
-                grouped.putIfAbsent(requestId, RequestAggregate.forStandaloneTask(task, task.getConversation()));
-            }
-        }
-
-        for (CustomerJtbd customerJtbd : customerJtbdRepository.findByCustomerIdOrderByCreatedAtDesc(customerId)) {
-            grouped.computeIfAbsent(
-                    CustomerRequestIds.forJtbd(customerJtbd),
-                    ignored -> RequestAggregate.forJtbd(customerJtbd, new ArrayList<>(), conversationFor(customerId)));
-        }
-        return grouped;
+    private RequestAggregate buildConversationAggregate(String customerId, Conversation conversation) {
+        List<Task> tasks = canonicalTasks(taskRepository.findByCustomerIdOrderByCreatedAtDesc(customerId), any());
+        List<CustomerJtbd> customerJtbds = customerJtbdRepository.findByCustomerIdOrderByCreatedAtDesc(customerId);
+        CustomerJtbd displayJtbd = customerJtbds.stream()
+                .filter(jtbd -> jtbd.getStatus() != JtbdInstanceStatus.COMPLETED)
+                .findFirst()
+                .orElse(customerJtbds.isEmpty() ? null : customerJtbds.get(0));
+        return RequestAggregate.forConversation(conversation, customerId, displayJtbd, tasks, customerJtbds);
     }
 
     private Conversation conversationFor(String customerId) {
@@ -283,6 +280,7 @@ public class CustomerRequestService {
         private final Conversation conversation;
         private final CustomerJtbd customerJtbd;
         private final List<Task> tasks;
+        private final List<CustomerJtbd> customerJtbds;
 
         private RequestAggregate(
                 String requestId,
@@ -290,13 +288,31 @@ public class CustomerRequestService {
                 String title,
                 Conversation conversation,
                 CustomerJtbd customerJtbd,
-                List<Task> tasks) {
+                List<Task> tasks,
+                List<CustomerJtbd> customerJtbds) {
             this.requestId = requestId;
             this.customerId = customerId;
             this.title = title;
             this.conversation = conversation;
             this.customerJtbd = customerJtbd;
             this.tasks = tasks;
+            this.customerJtbds = customerJtbds;
+        }
+
+        static RequestAggregate forConversation(
+                Conversation conversation,
+                String customerId,
+                CustomerJtbd displayJtbd,
+                List<Task> tasks,
+                List<CustomerJtbd> customerJtbds) {
+            return new RequestAggregate(
+                    CustomerRequestIds.forConversation(conversation),
+                    customerId,
+                    "Your support conversation",
+                    conversation,
+                    displayJtbd,
+                    tasks,
+                    customerJtbds);
         }
 
         static RequestAggregate forJtbd(CustomerJtbd customerJtbd, List<Task> tasks, Conversation conversation) {
@@ -306,7 +322,8 @@ public class CustomerRequestService {
                     customerJtbd.getJtbdType().getName(),
                     conversation,
                     customerJtbd,
-                    tasks);
+                    tasks,
+                    List.of(customerJtbd));
         }
 
         static RequestAggregate forStandaloneTask(Task task, Conversation conversation) {
@@ -318,28 +335,37 @@ public class CustomerRequestService {
                     titleForTask(task),
                     conversation,
                     null,
-                    tasks);
+                    tasks,
+                    List.of());
         }
 
         CustomerRequestDto toDto() {
             Task latestTask = tasks.stream()
                     .max(Comparator.comparing(Task::getUpdatedAt))
                     .orElse(null);
+            long activeJtbdCount = customerJtbds.stream()
+                    .filter(jtbd -> jtbd.getStatus() != JtbdInstanceStatus.COMPLETED)
+                    .count();
             String stageLabel = customerJtbd != null
                     ? customerJtbd.getCurrentStage().getStageName()
-                    : latestTask != null ? stageLabelForTask(latestTask) : "Open";
+                    : activeJtbdCount > 0 ? activeJtbdCount + " active request" + (activeJtbdCount == 1 ? "" : "s")
+                    : latestTask != null ? stageLabelForTask(latestTask) : "Conversation";
             String statusLabel = customerJtbd != null
                     ? (customerJtbd.getStatus() == JtbdInstanceStatus.COMPLETED ? "Completed" : "Active")
-                    : latestTask != null ? statusLabelForTask(latestTask) : "Active";
-            ChannelType sourceChannel = latestTask != null ? latestTask.getSourceChannel() : ChannelType.UI;
+                    : activeJtbdCount > 0 ? "Active" : latestTask != null ? statusLabelForTask(latestTask) : "Open";
+            ChannelType sourceChannel = latestTask != null
+                    ? latestTask.getSourceChannel()
+                    : conversation != null ? conversation.getPrimaryChannel() : ChannelType.UI;
             java.time.Instant createdAt = tasks.stream()
                     .map(Task::getCreatedAt)
                     .min(Comparator.naturalOrder())
-                    .orElse(customerJtbd != null ? customerJtbd.getCreatedAt() : java.time.Instant.now());
+                    .orElse(conversation != null ? conversation.getCreatedAt()
+                            : customerJtbd != null ? customerJtbd.getCreatedAt() : java.time.Instant.now());
             java.time.Instant updatedAt = tasks.stream()
                     .map(Task::getUpdatedAt)
                     .max(Comparator.naturalOrder())
-                    .orElse(customerJtbd != null ? customerJtbd.getUpdatedAt() : createdAt);
+                    .orElse(conversation != null ? conversation.getUpdatedAt()
+                            : customerJtbd != null ? customerJtbd.getUpdatedAt() : createdAt);
 
             return new CustomerRequestDto(
                     requestId,

@@ -39,7 +39,7 @@
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Start Support</p>
-                        <h3>Customer requests</h3>
+                        <h3>Customer conversation</h3>
                     </div>
                     <div class="actions-inline">
                         <button type="button" class="ghost-button" id="toggleStartSupport">Open new request</button>
@@ -63,8 +63,8 @@
                                 <input name="attachments" type="file" multiple>
                             </label>
                             <div class="form-footer">
-                                <p>Use this section only when a brand-new customer request needs to be created.</p>
-                                <button type="submit">Open new request in app</button>
+                                <p>Use this section only when a brand-new customer request needs to be created inside the same conversation.</p>
+                                <button type="submit">Start new request in this conversation</button>
                             </div>
                         </form>
                     </div>
@@ -75,23 +75,23 @@
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Customer App</p>
-                        <h3 id="customerAppHeading">Your requests</h3>
+                        <h3 id="customerAppHeading">Your support conversation</h3>
                     </div>
                 </div>
                 <div class="customer-app-shell">
                     <div class="app-header-strip">
                         <div>
-                            <strong>Request conversation</strong>
-                            <p id="customerAppSubhead">Click any request below to expand its full conversation and continue the journey.</p>
+                            <strong>Support conversation</strong>
+                            <p id="customerAppSubhead">Your customer journey stays in one continuous thread, even when multiple requests exist over time.</p>
                         </div>
                         <span class="status-pill good" id="customerStatusPill">Ready</span>
                     </div>
                     <div class="subpanel task-list-shell">
                         <div class="subpanel-head">
-                            <h4>Your requests</h4>
-                            <span id="customerTaskCount" class="small-note">0 requests</span>
+                            <h4>Your conversation</h4>
+                            <span id="customerTaskCount" class="small-note">0 conversations</span>
                         </div>
-                        <div id="customerTaskList" class="queue-stack empty-state">No requests yet.</div>
+                        <div id="customerTaskList" class="queue-stack empty-state">No conversation yet.</div>
                     </div>
                 </div>
             </section>
