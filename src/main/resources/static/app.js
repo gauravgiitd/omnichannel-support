@@ -93,7 +93,6 @@ function bindControls() {
                 ? state.agentCustomerFilter
                 : state.selectedTaskId
     ));
-    bindClick("toggleStartSupport", toggleStartSupport);
     bindClick("refreshAdmin", refreshAdminDashboard);
     bindClick("resetContactMappingForm", resetContactMappingForm);
     bindClick("refreshJtbdView", refreshJtbdDashboard);
