@@ -192,6 +192,15 @@ public class JtbdService {
     }
 
     @Transactional
+    public CustomerJtbd findOrCreateActiveJtbdByTypeName(String customerId, String typeName) {
+        String resolvedName = typeName == null || typeName.isBlank() ? GENERAL_SUPPORT_TYPE_NAME : typeName.trim();
+        return customerJtbdRepository.findByCustomerIdAndStatusOrderByCreatedAtDesc(customerId, JtbdInstanceStatus.ACTIVE).stream()
+                .filter(instance -> instance.getJtbdType().getName().equalsIgnoreCase(resolvedName))
+                .findFirst()
+                .orElseGet(() -> createCustomerJtbdEntity(customerId, ensureTypeWithDefaultStages(resolvedName)));
+    }
+
+    @Transactional
     public CustomerJtbdDto updateCustomerJtbd(String publicId, UpdateCustomerJtbdRequest request) {
         CustomerJtbd instance = loadCustomerJtbd(publicId);
         JtbdTypeStage stage = resolveStage(instance.getJtbdType(), request.stageKey())
@@ -320,6 +329,57 @@ public class JtbdService {
             jtbdTypeStageRepository.saveAll(List.of(openStage, completedStage));
         }
         return type;
+    }
+
+    private JtbdType ensureTypeWithDefaultStages(String typeName) {
+        if (GENERAL_SUPPORT_TYPE_NAME.equalsIgnoreCase(typeName)) {
+            return ensureGeneralSupportType();
+        }
+        Optional<JtbdType> existing = jtbdTypeRepository.findByName(typeName);
+        if (existing.isPresent()) {
+            JtbdType type = existing.get();
+            if (!jtbdTypeStageRepository.findByJtbdTypeOrderByStageOrderAsc(type).isEmpty()) {
+                return type;
+            }
+        }
+        JtbdType type = existing.orElseGet(JtbdType::new);
+        if (type.getPublicId() == null || type.getPublicId().isBlank()) {
+            type.setPublicId(UUID.randomUUID().toString());
+        }
+        type.setName(typeName);
+        type.setDescription("Auto-created JTBD type for inbound support orchestration.");
+        jtbdTypeRepository.save(type);
+        if (jtbdTypeStageRepository.findByJtbdTypeOrderByStageOrderAsc(type).isEmpty()) {
+            JtbdTypeStage openStage = new JtbdTypeStage();
+            openStage.setJtbdType(type);
+            openStage.setStageKey("open");
+            openStage.setStageName("Open");
+            openStage.setStageOrder(1);
+            openStage.setTerminalCompleted(false);
+
+            JtbdTypeStage completedStage = new JtbdTypeStage();
+            completedStage.setJtbdType(type);
+            completedStage.setStageKey("completed");
+            completedStage.setStageName("Completed");
+            completedStage.setStageOrder(2);
+            completedStage.setTerminalCompleted(true);
+            jtbdTypeStageRepository.saveAll(List.of(openStage, completedStage));
+        }
+        return type;
+    }
+
+    private CustomerJtbd createCustomerJtbdEntity(String customerId, JtbdType type) {
+        List<JtbdTypeStage> stages = jtbdTypeStageRepository.findByJtbdTypeOrderByStageOrderAsc(type);
+        if (stages.isEmpty()) {
+            throw new ValidationException("JTBD type must have at least one stage");
+        }
+        CustomerJtbd instance = new CustomerJtbd();
+        instance.setPublicId(UUID.randomUUID().toString());
+        instance.setCustomerId(customerId.trim());
+        instance.setJtbdType(type);
+        instance.setCurrentStage(stages.get(0));
+        instance.setStatus(stages.get(0).isTerminalCompleted() ? JtbdInstanceStatus.COMPLETED : JtbdInstanceStatus.ACTIVE);
+        return customerJtbdRepository.save(instance);
     }
 
     private void validateStages(List<UpsertJtbdTypeRequest.StageRequest> stages) {

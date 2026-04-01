@@ -7,6 +7,8 @@ import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.PendingSelectionType;
 import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Task;
+import com.omnichannel.support.domain.TaskType;
+import com.omnichannel.support.domain.ExecutionTier;
 import com.omnichannel.support.domain.TaskPriority;
 import com.omnichannel.support.dto.CreateTaskRequest;
 import com.omnichannel.support.dto.DocumentDto;
@@ -49,7 +51,11 @@ public class InboundEmailService {
     private final JtbdService jtbdService;
     private final CustomerConversationContextService customerConversationContextService;
     private final CustomerChannelNotificationService customerChannelNotificationService;
+    private final AssignmentService assignmentService;
+    private final DocumentLinkService documentLinkService;
+    private final RoutingService routingService;
     private final AuditService auditService;
+    private final InboundMessageUnderstandingService inboundMessageUnderstandingService;
 
     @Transactional
     public InboundEmailResult ingest(InboundEmailRequest request) {
@@ -89,7 +95,7 @@ public class InboundEmailService {
                 throw new ValidationException("JTBD does not belong to resolved customer");
             }
             customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, jtbd.getPublicId());
-            return appendToConversation(customerId, jtbd, request);
+            return appendToConversation(customerId, jtbd, request, null);
         }
 
         Optional<CustomerConversationContextService.PendingSelection> pendingSelection =
@@ -105,7 +111,7 @@ public class InboundEmailService {
         if (isSwitchToJtbdRequest(request.bodyText()) && !activeJtbds.isEmpty()) {
             if (activeJtbds.size() == 1) {
                 customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, activeJtbds.get(0).getPublicId());
-                return appendToConversation(customerId, activeJtbds.get(0), request);
+                return appendToConversation(customerId, activeJtbds.get(0), request, null);
             }
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
@@ -116,13 +122,47 @@ public class InboundEmailService {
 
         Optional<CustomerJtbd> activeJtbd = activeContextJtbd(customerId);
         if (activeJtbd.isPresent()) {
-            return appendToConversation(customerId, activeJtbd.get(), request);
+            InboundMessageUnderstandingService.InboundDecision decision =
+                    inboundMessageUnderstandingService.analyze(
+                            request.bodyText(),
+                            request.claimIdHint(),
+                            request.policyIdHint(),
+                            request.attachments() != null && !request.attachments().isEmpty(),
+                            activeJtbds);
+            if (decision.createExpertTask()) {
+                return createExpertTask(request, customerId, activeJtbd.get(), decision);
+            }
+            return appendToConversation(customerId, activeJtbd.get(), request, decision.assignedQueue());
+        }
+
+        InboundMessageUnderstandingService.InboundDecision decision =
+                inboundMessageUnderstandingService.analyze(
+                        request.bodyText(),
+                        request.claimIdHint(),
+                        request.policyIdHint(),
+                        request.attachments() != null && !request.attachments().isEmpty(),
+                        activeJtbds);
+        if (decision.createNewJtbd()) {
+            CustomerJtbd createdJtbd =
+                    inboundMessageUnderstandingService.createCustomerJtbd(
+                            customerId, decision.newJtbdTypeName(), jtbdService);
+            customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, createdJtbd.getPublicId());
+            return decision.createExpertTask()
+                    ? createExpertTask(request, customerId, createdJtbd, decision)
+                    : appendToConversation(customerId, createdJtbd, request, decision.assignedQueue());
+        }
+        if (decision.matchedJtbd() != null) {
+            customerConversationContextService.setActiveJtbd(
+                    customerId, ChannelType.EMAIL, decision.matchedJtbd().getPublicId());
+            return decision.createExpertTask()
+                    ? createExpertTask(request, customerId, decision.matchedJtbd(), decision)
+                    : appendToConversation(customerId, decision.matchedJtbd(), request, decision.assignedQueue());
         }
 
         if (!activeJtbds.isEmpty()) {
             if (activeJtbds.size() == 1) {
                 customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, activeJtbds.get(0).getPublicId());
-                return appendToConversation(customerId, activeJtbds.get(0), request);
+                return appendToConversation(customerId, activeJtbds.get(0), request, decision.assignedQueue());
             }
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
@@ -134,7 +174,7 @@ public class InboundEmailService {
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        return appendToConversation(customerId, null, request);
+        return appendToConversation(customerId, null, request, decision.assignedQueue());
     }
 
     private Optional<Task> activeContextTask(String customerId) {
@@ -171,6 +211,7 @@ public class InboundEmailService {
                         normalizeMessageId(request.messageId()),
                         metadata);
         customerConversationContextService.setActiveTask(customerId, ChannelType.EMAIL, canonical.getTaskNumber());
+        linkDocumentsToMessage(documents, message, canonical.getCustomerJtbd(), canonical);
         auditService.record(
                 "INBOUND_EMAIL_APPENDED",
                 "Task",
@@ -182,7 +223,7 @@ public class InboundEmailService {
     }
 
     private InboundEmailResult appendToConversation(
-            String customerId, CustomerJtbd customerJtbd, InboundEmailRequest request) {
+            String customerId, CustomerJtbd customerJtbd, InboundEmailRequest request, String assignedGroup) {
         Conversation conversation = customerConversationService.getOrCreate(customerId, ChannelType.EMAIL);
         List<DocumentDto> documents = registerEmailAttachments(conversation, customerJtbd, customerId, request);
         List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
@@ -212,6 +253,7 @@ public class InboundEmailService {
             customerConversationContextService.clearActiveTask(customerId, ChannelType.EMAIL);
             customerConversationContextService.clearActiveJtbd(customerId, ChannelType.EMAIL);
         }
+        linkDocumentsToMessage(documents, message, customerJtbd, null);
         auditService.record(
                 "INBOUND_EMAIL_CONVERSATION_APPENDED",
                 "Conversation",
@@ -219,7 +261,60 @@ public class InboundEmailService {
                 "SYSTEM",
                 "email-adapter",
                 Map.of("message_id", message.messageId()));
+        assignmentService.assign(
+                conversation,
+                messageRepository.findByPublicId(message.messageId()).orElse(null),
+                assignedGroup != null ? assignedGroup : deriveAssignedGroup(request, customerJtbd),
+                null);
         return new InboundEmailResult(null, message.messageId(), InboundOutcome.APPENDED);
+    }
+
+    private InboundEmailResult createExpertTask(
+            InboundEmailRequest request,
+            String customerId,
+            CustomerJtbd customerJtbd,
+            InboundMessageUnderstandingService.InboundDecision decision) {
+        Map<String, Object> metadata = buildEmailMetadata(request);
+        metadata.put("customer_jtbd_id", customerJtbd.getPublicId());
+        metadata.put("jtbd_type", customerJtbd.getJtbdType().getName());
+        Task task = taskService.createInternalTask(
+                new CreateTaskRequest(
+                        customerId,
+                        decision.taskIssueType() != null ? decision.taskIssueType() : "expert_follow_up",
+                        decision.domain().name().toLowerCase(Locale.ROOT),
+                        blankToNull(request.claimIdHint()),
+                        blankToNull(request.policyIdHint()),
+                        TaskPriority.MEDIUM,
+                        ChannelType.EMAIL,
+                        request.bodyText(),
+                        request.fromAddress(),
+                        metadata,
+                        normalizeMessageId(request.messageId())),
+                customerJtbd,
+                TaskType.EXPERT_TASK,
+                ExecutionTier.EXPERT,
+                decision.assignedQueue());
+
+        List<DocumentDto> documents = registerEmailAttachments(task, customerId, request);
+        List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
+        List<String> fileUrls = documents.stream().map(DocumentDto::fileUrl).toList();
+        conversationService.enrichLatestMessageWithInboundFiles(task, fileUrls, docIds);
+        MessageDto latest = latestMessage(task);
+        linkDocumentsToMessage(documents, latest, customerJtbd, task);
+        customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, customerJtbd.getPublicId());
+        auditService.record(
+                "INBOUND_EMAIL_EXPERT_TASK_CREATED",
+                "Task",
+                task.getTaskNumber(),
+                "SYSTEM",
+                "email-adapter",
+                Map.of("customer_jtbd_id", customerJtbd.getPublicId()));
+        return new InboundEmailResult(task.getTaskNumber(), latest != null ? latest.messageId() : null, InboundOutcome.CREATED);
+    }
+
+    private MessageDto latestMessage(Task task) {
+        List<MessageDto> timeline = conversationService.listTimeline(task);
+        return timeline.isEmpty() ? null : timeline.get(timeline.size() - 1);
     }
 
     private InboundEmailResult createNewTask(InboundEmailRequest request, String customerId, CustomerJtbd customerJtbd) {
@@ -252,6 +347,7 @@ public class InboundEmailService {
         List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
         List<String> fileUrls = documents.stream().map(DocumentDto::fileUrl).toList();
         conversationService.enrichLatestMessageWithInboundFiles(task, fileUrls, docIds);
+        linkDocumentsToMessage(documents, latestMessage(task), customerJtbd, task);
         customerConversationContextService.setActiveTask(customerId, ChannelType.EMAIL, task.getTaskNumber());
 
         auditService.record(
@@ -352,6 +448,45 @@ public class InboundEmailService {
     private static void assertCustomerOwns(String customerId, Task task) {
         if (!task.getCustomerId().equals(customerId)) {
             throw new ValidationException("task does not belong to resolved customer");
+        }
+    }
+
+    private String deriveAssignedGroup(InboundEmailRequest request, CustomerJtbd customerJtbd) {
+        if (customerJtbd != null) {
+            return taskRepository.findByCustomerJtbdIdOrderByCreatedAtDesc(customerJtbd.getId()).stream()
+                    .map(Task::getAssignedQueue)
+                    .filter(value -> value != null && !value.isBlank())
+                    .findFirst()
+                    .orElse(routingService.resolveQueue(
+                            RoutingContext.builder()
+                                    .issueType(customerJtbd.getJtbdType().getName())
+                                    .lob(blankToNull(request.lobHint()))
+                                    .claimId(blankToNull(request.claimIdHint()))
+                                    .policyId(blankToNull(request.policyIdHint()))
+                                    .build()));
+        }
+        return routingService.resolveQueue(
+                RoutingContext.builder()
+                        .issueType(IssueTypeParser.fromEmail(request.subject(), request.bodyText()))
+                        .lob(blankToNull(request.lobHint()))
+                        .claimId(blankToNull(request.claimIdHint()))
+                        .policyId(blankToNull(request.policyIdHint()))
+                        .build());
+    }
+
+    private void linkDocumentsToMessage(
+            List<DocumentDto> documents, MessageDto message, CustomerJtbd customerJtbd, Task task) {
+        if (documents == null || documents.isEmpty() || message == null) {
+            return;
+        }
+        var savedMessage = messageRepository.findByPublicId(message.messageId()).orElse(null);
+        for (DocumentDto document : documents) {
+            documentLinkService.link(
+                    documentService.getByPublicId(document.documentId()),
+                    null,
+                    savedMessage,
+                    customerJtbd,
+                    task);
         }
     }
 

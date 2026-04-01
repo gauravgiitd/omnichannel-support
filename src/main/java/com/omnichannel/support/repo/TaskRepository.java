@@ -1,5 +1,6 @@
 package com.omnichannel.support.repo;
 
+import com.omnichannel.support.domain.ExecutionTier;
 import com.omnichannel.support.domain.Task;
 import com.omnichannel.support.domain.TaskStatus;
 import java.util.Collection;
@@ -26,4 +27,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     @EntityGraph(attributePaths = {"conversation", "customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
     List<Task> findByCustomerJtbdIdOrderByCreatedAtDesc(Long customerJtbdId);
+
+    @EntityGraph(attributePaths = {"conversation", "customerJtbd", "customerJtbd.jtbdType", "customerJtbd.currentStage"})
+    List<Task> findByExecutionTierOrderByCreatedAtDesc(ExecutionTier executionTier);
 }

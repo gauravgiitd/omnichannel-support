@@ -26,6 +26,11 @@ public class PrototypePageController {
         return "forward:/agent.html";
     }
 
+    @GetMapping("/expert")
+    public String expert() {
+        return "forward:/expert.html";
+    }
+
     @GetMapping("/admin")
     public String admin() {
         return "forward:/admin.html";

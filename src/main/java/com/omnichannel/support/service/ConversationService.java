@@ -7,6 +7,8 @@ import com.omnichannel.support.domain.ChannelType;
 import com.omnichannel.support.domain.Conversation;
 import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.Message;
+import com.omnichannel.support.domain.MessageIntentType;
+import com.omnichannel.support.domain.MessageJtbdLinkageType;
 import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Task;
 import com.omnichannel.support.dto.MessageDto;
@@ -27,6 +29,7 @@ public class ConversationService {
 
     private final MessageRepository messageRepository;
     private final ObjectMapper objectMapper;
+    private final MessageLinkService messageLinkService;
 
     @Transactional(readOnly = true)
     public List<MessageDto> listTimeline(Task task) {
@@ -95,6 +98,7 @@ public class ConversationService {
             List<String> attachmentUrls,
             String externalThreadRef,
             Map<String, Object> metadata) {
+        MessageIntentType intentType = inferIntentType(senderType, body, customerJtbd, metadata);
         Message message = new Message();
         message.setPublicId(UUID.randomUUID().toString());
         message.setConversation(conversation);
@@ -102,12 +106,18 @@ public class ConversationService {
         message.setTask(task);
         message.setChannel(channel);
         message.setSenderType(senderType);
+        message.setIntentType(intentType);
         message.setSenderIdentifier(senderIdentifier);
         message.setBody(body);
         message.setAttachmentJson(toJsonArray(attachmentUrls));
         message.setExternalThreadRef(externalThreadRef);
         message.setMetadataJson(toJsonObject(metadata));
         Message saved = messageRepository.save(message);
+        if (customerJtbd != null) {
+            messageLinkService.linkToJtbd(saved, customerJtbd, MessageJtbdLinkageType.ACTIVE_CONTEXT, 0.9d);
+        } else if (task != null && task.getCustomerJtbd() != null) {
+            messageLinkService.linkToJtbd(saved, task.getCustomerJtbd(), MessageJtbdLinkageType.INFERRED, 0.7d);
+        }
         return toDto(saved);
     }
 
@@ -141,6 +151,8 @@ public class ConversationService {
         return new MessageDto(
                 message.getPublicId(),
                 message.getTask() != null ? message.getTask().getTaskNumber() : null,
+                message.getCustomerJtbd() != null ? message.getCustomerJtbd().getPublicId() : null,
+                message.getCustomerJtbd() != null ? message.getCustomerJtbd().getJtbdType().getName() : null,
                 message.getChannel(),
                 message.getSenderType(),
                 message.getSenderIdentifier(),
@@ -150,6 +162,30 @@ public class ConversationService {
                 message.getExternalThreadRef(),
                 meta,
                 message.getCreatedAt());
+    }
+
+    private static MessageIntentType inferIntentType(
+            SenderType senderType, String body, CustomerJtbd customerJtbd, Map<String, Object> metadata) {
+        if (senderType == SenderType.SYSTEM) {
+            return MessageIntentType.SYSTEM_UPDATE;
+        }
+        if (metadata != null && metadata.containsKey("attachment_ids")) {
+            return MessageIntentType.DOCUMENT_SUBMISSION;
+        }
+        String normalized = body == null ? "" : body.toLowerCase(java.util.Locale.ROOT);
+        if (normalized.contains("status")) {
+            return MessageIntentType.STATUS_QUERY;
+        }
+        if (normalized.contains("i want to")
+                || normalized.contains("need a refund")
+                || normalized.contains("report a claim")
+                || normalized.contains("update my policy")) {
+            return customerJtbd == null ? MessageIntentType.REQUEST_CREATION : MessageIntentType.REQUEST_UPDATE;
+        }
+        if (customerJtbd != null) {
+            return MessageIntentType.REQUEST_UPDATE;
+        }
+        return MessageIntentType.GENERAL_QUERY;
     }
 
     @SuppressWarnings("unchecked")

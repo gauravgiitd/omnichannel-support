@@ -1,0 +1,69 @@
+package com.omnichannel.support.api;
+
+import com.omnichannel.support.dto.AgentCustomerWorkspaceDto;
+import com.omnichannel.support.dto.ApiResponse;
+import com.omnichannel.support.dto.CustomerSummaryDto;
+import com.omnichannel.support.dto.DocumentDto;
+import com.omnichannel.support.dto.MessageDto;
+import com.omnichannel.support.dto.PostMessageRequest;
+import com.omnichannel.support.dto.RegisterDocumentRequest;
+import com.omnichannel.support.security.AppUser;
+import com.omnichannel.support.security.AuthenticatedUserService;
+import com.omnichannel.support.service.AgentWorkspaceService;
+import jakarta.validation.Valid;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/v1/agent")
+@RequiredArgsConstructor
+public class AgentWorkspaceController {
+
+    private final AgentWorkspaceService agentWorkspaceService;
+    private final AuthenticatedUserService authenticatedUserService;
+
+    @GetMapping("/customers")
+    public ResponseEntity<ApiResponse<List<CustomerSummaryDto>>> listCustomers() {
+        return ResponseEntity.ok(ApiResponse.success(agentWorkspaceService.listCustomers()));
+    }
+
+    @GetMapping("/customers/{customerId}/workspace")
+    public ResponseEntity<ApiResponse<AgentCustomerWorkspaceDto>> getWorkspace(
+            @PathVariable("customerId") String customerId) {
+        return ResponseEntity.ok(ApiResponse.success(agentWorkspaceService.getWorkspace(customerId)));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/messages", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<MessageDto>> postMessage(
+            @PathVariable("customerId") String customerId,
+            @RequestParam(name = "taskId", required = false) String taskId,
+            @Valid @RequestBody PostMessageRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        MessageDto message = agentWorkspaceService.postConversationMessage(customerId, user.email(), taskId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(message));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/documents", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<DocumentDto>> registerDocument(
+            @PathVariable("customerId") String customerId,
+            @RequestParam(name = "taskId", required = false) String taskId,
+            @Valid @RequestBody RegisterDocumentRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        DocumentDto document =
+                agentWorkspaceService.registerConversationDocument(customerId, user.email(), taskId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(document));
+    }
+}

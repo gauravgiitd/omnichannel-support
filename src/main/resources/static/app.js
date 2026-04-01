@@ -14,15 +14,19 @@ const state = {
     view: "landing",
     user: null,
     tasks: [],
+    agentCustomers: [],
+    agentWorkspace: null,
     customerRequests: [],
     contactMappings: [],
     jtbdTypes: [],
     jtbdCustomers: [],
     customerJtbdsByCustomer: {},
     selectedJtbdCustomerId: null,
-    agentCustomerFilter: "ALL",
+    agentCustomerFilter: "",
+    agentDomainFilter: "ALL",
     selectedTaskId: localStorage.getItem(STORAGE_KEYS.taskId),
     selectedRequestId: normalizeCustomerRequestId(requestFromUrl || legacyTaskFromUrl || localStorage.getItem(STORAGE_KEYS.requestId)),
+    expertMessageScope: "relevant",
     currentTask: null,
     currentRequest: null,
     messages: [],
@@ -77,7 +81,13 @@ function setupTabs() {
 }
 
 function bindControls() {
-    bindClick("refreshBoard", () => refreshBoard(state.view === "customer" ? state.selectedRequestId : state.selectedTaskId));
+    bindClick("refreshBoard", () => refreshBoard(
+        state.view === "customer"
+            ? state.selectedRequestId
+            : state.view === "agent"
+                ? state.agentCustomerFilter
+                : state.selectedTaskId
+    ));
     bindClick("toggleStartSupport", toggleStartSupport);
     bindClick("refreshAdmin", refreshAdminDashboard);
     bindClick("resetContactMappingForm", resetContactMappingForm);
@@ -86,61 +96,82 @@ function bindControls() {
     const agentCustomerFilter = el("agentCustomerFilter");
     if (agentCustomerFilter) {
         agentCustomerFilter.addEventListener("change", (event) => {
-            state.agentCustomerFilter = event.target.value || "ALL";
-            renderQueueBoard();
+            state.agentCustomerFilter = event.target.value || "";
+            if (state.view === "agent" && state.agentCustomerFilter) {
+                void selectAgentCustomer(state.agentCustomerFilter);
+            }
         });
     }
+    const agentDomainFilter = el("agentDomainFilter");
+    if (agentDomainFilter) {
+        agentDomainFilter.addEventListener("change", (event) => {
+            state.agentDomainFilter = event.target.value || "ALL";
+            renderAgentWorkspace();
+        });
+    }
+    bindClick("expertScopeRelevant", () => setExpertMessageScope("relevant"));
+    bindClick("expertScopeConversation", () => setExpertMessageScope("conversation"));
 }
 
 function bindForms() {
-    bindSubmit("appForm", async (event) => {
-        const data = new FormData(event.currentTarget);
-        const response = await api("/v1/customers/me/requests", {
-            method: "POST",
-            body: {
-                issue_type: "policy",
-                lob: "motor",
-                claim_id: null,
-                policy_id: "POL-2026-4421",
-                priority: "MEDIUM",
-                source_channel: "UI",
-                initial_message_body: data.get("initialMessageBody"),
-                sender_identifier: state.user.email,
-                initial_message_metadata: { source: "customer_app" },
-                initial_external_thread_ref: `ui-${Date.now()}`
-            }
-        });
-
-        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
-        for (const file of uploadedFiles) {
-            await api(`/v1/customers/me/requests/${encodeURIComponent(response.data.request_id)}/documents`, {
-                method: "POST",
-                body: {
-                    channel: "UI",
-                    sender_type: "CUSTOMER",
-                    sender_identifier: state.user.email,
-                    file_url: file.file_token,
-                    document_type: "customer_upload",
-                    message_body: "Customer uploaded a document while opening the request.",
-                    metadata: {
-                        source: "customer_app_upload",
-                        drive_file_id: driveFileIdFromToken(file.file_token),
-                        file_name: file.file_name,
-                        mime_type: file.mime_type
-                    }
-                }
-            });
-        }
-
-        pushEvent("Customer created a new request", `${response.data.title} was opened from the app.`);
-        await refreshBoard(response.data.request_id);
-    });
+    bindSubmit("customerComposeForm", submitCustomerComposeForm);
 
     bindSubmit("replyForm", async (event) => {
-        ensureTaskSelected();
         const data = new FormData(event.currentTarget);
         const body = data.get("body");
         const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
+
+        if (state.view === "agent") {
+            ensureAgentCustomerSelected();
+            const query = state.selectedTaskId ? `?taskId=${encodeURIComponent(state.selectedTaskId)}` : "";
+            const messageResponse = await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/messages${query}`, {
+                method: "POST",
+                body: {
+                    channel: state.currentTask ? state.currentTask.source_channel : "UI",
+                    sender_type: "AGENT",
+                    sender_identifier: state.user.email,
+                    body,
+                    attachment_urls: [],
+                    metadata: { source: "agent_workspace" }
+                }
+            });
+
+            for (const file of uploadedFiles) {
+                await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/documents${query}`, {
+                    method: "POST",
+                    body: {
+                        channel: state.currentTask ? state.currentTask.source_channel : "UI",
+                        sender_type: "AGENT",
+                        sender_identifier: state.user.email,
+                        file_url: file.file_token,
+                        document_type: "agent_attachment",
+                        message_body: "Agent attached a supporting document.",
+                        metadata: {
+                            source: "agent_workspace_upload",
+                            drive_file_id: driveFileIdFromToken(file.file_token),
+                            file_name: file.file_name,
+                            mime_type: file.mime_type
+                        }
+                    }
+                });
+            }
+
+            const origin = state.currentTask ? channelLabel(state.currentTask.source_channel) : "APP";
+            const deliveryStatus = messageResponse?.data?.metadata?.delivery_status;
+            const deliveryError = messageResponse?.data?.metadata?.delivery_error;
+            if (deliveryStatus === "failed") {
+                pushEvent(
+                    "Agent response recorded",
+                    `The reply was added to the conversation, but delivery to ${origin} failed${deliveryError ? `: ${deliveryError}` : "."}`
+                );
+            } else {
+                pushEvent("Agent responded", `The reply was recorded in the shared conversation${state.selectedTaskId ? ` on ${state.selectedTaskId}` : ""}.`);
+            }
+            await refreshBoard(state.agentCustomerFilter);
+            return;
+        }
+
+        ensureTaskSelected();
 
         const messageResponse = await api(`/v1/tasks/${state.selectedTaskId}/messages`, {
             method: "POST",
@@ -199,6 +230,63 @@ function bindForms() {
         });
 
         pushEvent("Task updated", `${response.data.task_id} is now ${response.data.status}.`);
+        await refreshBoard(response.data.task_id);
+    });
+
+    bindSubmit("expertReplyForm", async (event) => {
+        ensureTaskSelected();
+        const data = new FormData(event.currentTarget);
+        const body = data.get("body");
+        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
+
+        await api(`/v1/expert/tasks/${state.selectedTaskId}/messages`, {
+            method: "POST",
+            body: {
+                channel: "UI",
+                sender_type: "EXPERT",
+                sender_identifier: state.user.email,
+                body,
+                attachment_urls: [],
+                metadata: { source: "expert_workspace" }
+            }
+        });
+
+        for (const file of uploadedFiles) {
+            await api(`/v1/expert/tasks/${state.selectedTaskId}/documents`, {
+                method: "POST",
+                body: {
+                    channel: "UI",
+                    sender_type: "EXPERT",
+                    sender_identifier: state.user.email,
+                    file_url: file.file_token,
+                    document_type: "expert_attachment",
+                    message_body: "Expert attached a supporting document.",
+                    metadata: {
+                        source: "expert_workspace_upload",
+                        drive_file_id: driveFileIdFromToken(file.file_token),
+                        file_name: file.file_name,
+                        mime_type: file.mime_type
+                    }
+                }
+            });
+        }
+
+        pushEvent("Expert update saved", "The expert note and any supporting documents were added to the task record.");
+        await refreshBoard(state.selectedTaskId);
+    });
+
+    bindSubmit("expertPatchForm", async (event) => {
+        ensureTaskSelected();
+        const data = new FormData(event.currentTarget);
+        const response = await api(`/v1/expert/tasks/${state.selectedTaskId}`, {
+            method: "PATCH",
+            body: pruneEmpty({
+                assigned_agent: data.get("assignedAgent"),
+                status: data.get("status")
+            })
+        });
+
+        pushEvent("Expert task updated", `${response.data.task_id} is now ${response.data.status || "updated"}.`);
         await refreshBoard(response.data.task_id);
     });
 
@@ -301,6 +389,12 @@ async function refreshBoard(preferredTaskId) {
     if (state.view === "customer") {
         const customerResponse = await api("/v1/customers/me/requests");
         state.customerRequests = customerResponse.data;
+    } else if (state.view === "agent") {
+        const response = await api("/v1/agent/customers");
+        state.agentCustomers = response.data;
+    } else if (state.view === "expert") {
+        const response = await api("/v1/expert/tasks");
+        state.tasks = response.data;
     } else {
         const response = await api("/v1/tasks");
         state.tasks = response.data;
@@ -309,6 +403,16 @@ async function refreshBoard(preferredTaskId) {
     renderMetrics();
     renderQueueBoard();
     renderCustomerTaskList();
+
+    if (state.view === "agent") {
+        const targetCustomerId = preferredTaskId || state.agentCustomerFilter || findRelevantTaskId();
+        if (targetCustomerId) {
+            await selectAgentCustomer(targetCustomerId);
+        } else {
+            clearWorkspace();
+        }
+        return;
+    }
 
     const targetId = preferredTaskId || (state.view === "customer" ? state.selectedRequestId : state.selectedTaskId) || findRelevantTaskId();
     if (targetId) {
@@ -383,7 +487,11 @@ async function runAutoRefresh() {
             await refreshJtbdDashboard();
             return;
         }
-        const preferredId = state.view === "customer" ? state.selectedRequestId : state.selectedTaskId;
+        const preferredId = state.view === "customer"
+            ? state.selectedRequestId
+            : state.view === "agent"
+                ? state.agentCustomerFilter
+                : state.selectedTaskId;
         await refreshBoard(preferredId);
     } catch (error) {
         console.warn("Auto-refresh failed", error);
@@ -393,19 +501,29 @@ async function runAutoRefresh() {
 }
 
 function findRelevantTaskId() {
-    const list = state.view === "customer" ? state.customerRequests : state.tasks;
+    const list = state.view === "customer" ? state.customerRequests : state.view === "agent" ? state.agentCustomers : state.tasks;
     if (!list[0]) {
         return null;
     }
-    return state.view === "customer" ? list[0].request_id : list[0].task_id;
+    if (state.view === "customer") {
+        return list[0].request_id;
+    }
+    if (state.view === "agent") {
+        return list[0].customer_id;
+    }
+    return list[0].task_id;
 }
 
 async function selectTask(taskId) {
     persistTaskId(taskId);
+    const basePath = state.view === "expert" ? "/v1/expert/tasks" : "/v1/tasks";
+    const messagePath = state.view === "expert"
+        ? `${basePath}/${taskId}/messages?scope=${encodeURIComponent(state.expertMessageScope)}`
+        : `${basePath}/${taskId}/messages`;
     const [taskResponse, messageResponse, documentResponse] = await Promise.all([
-        api(`/v1/tasks/${taskId}`),
-        api(`/v1/tasks/${taskId}/messages`),
-        api(`/v1/tasks/${taskId}/documents`)
+        api(`${basePath}/${taskId}`),
+        api(messagePath),
+        api(`${basePath}/${taskId}/documents`)
     ]);
 
     state.currentTask = taskResponse.data;
@@ -413,10 +531,31 @@ async function selectTask(taskId) {
     state.documents = documentResponse.data;
 
     syncFormsWithTask();
-    renderAgentWorkspace();
+    if (state.view === "expert") {
+        renderExpertWorkspace();
+        renderExpertTaskBoard();
+    } else {
+        renderAgentWorkspace();
+    }
     renderCustomerExperience();
     renderCustomerTaskList();
     renderQueueBoard();
+}
+
+async function selectAgentCustomer(customerId) {
+    state.agentCustomerFilter = customerId;
+    const response = await api(`/v1/agent/customers/${encodeURIComponent(customerId)}/workspace`);
+    state.agentWorkspace = response.data;
+    state.tasks = response.data.tasks || [];
+    state.messages = response.data.messages || [];
+    state.documents = response.data.documents || [];
+    persistTaskId(resolveAgentSelectedTask(response.data));
+    state.currentTask = (state.tasks || []).find((task) => task.task_id === state.selectedTaskId) || null;
+    populateAgentCustomerFilter();
+    populateAgentDomainFilter();
+    renderMetrics();
+    renderAgentCustomerList();
+    renderAgentWorkspace();
 }
 
 async function selectCustomerRequest(requestId) {
@@ -441,11 +580,23 @@ function renderMetrics() {
         return;
     }
 
-    const metrics = [
-        { label: "Total tasks", value: state.tasks.length, copy: "All omnichannel issues" },
-        { label: "Open tasks", value: state.tasks.filter((task) => !["RESOLVED", "CLOSED"].includes(task.status)).length, copy: "Still active with support" },
-        { label: "Customers", value: new Set(state.tasks.map((task) => task.customer_id)).size, copy: "Customers represented" }
-    ];
+    const metrics = state.view === "agent"
+        ? [
+            { label: "Customers", value: state.agentCustomers.length, copy: "Customers with tracked support activity" },
+            { label: "Visible JTBDs", value: filteredAgentJtbds().length, copy: "Requests visible in this workspace" },
+            { label: "Visible tasks", value: filteredAgentTasks().length, copy: "Internal work items for the selected customer" }
+        ]
+        : state.view === "expert"
+        ? [
+            { label: "Expert tasks", value: state.tasks.length, copy: "Tasks in the expert execution tier" },
+            { label: "Open tasks", value: state.tasks.filter((task) => !["RESOLVED", "CLOSED"].includes(task.status)).length, copy: "Still need expert action" },
+            { label: "Assigned to me", value: state.tasks.filter((task) => (task.assigned_agent || "").toLowerCase() === (state.user?.email || "").toLowerCase()).length, copy: "Currently owned by your expert account" }
+        ]
+        : [
+            { label: "Total tasks", value: state.tasks.length, copy: "All omnichannel issues" },
+            { label: "Open tasks", value: state.tasks.filter((task) => !["RESOLVED", "CLOSED"].includes(task.status)).length, copy: "Still active with support" },
+            { label: "Customers", value: new Set(state.tasks.map((task) => task.customer_id)).size, copy: "Customers represented" }
+        ];
 
     metricsEl.innerHTML = metrics.map((metric) => `
         <article class="metric-card">
@@ -601,6 +752,14 @@ function renderJtbdCustomers() {
 }
 
 function renderQueueBoard() {
+    if (state.view === "expert") {
+        renderExpertTaskBoard();
+        return;
+    }
+    if (state.view === "agent") {
+        renderAgentCustomerList();
+        return;
+    }
     const queueBoard = el("queueBoard");
     if (!queueBoard) {
         return;
@@ -630,10 +789,36 @@ function renderQueueBoard() {
     });
 }
 
+function renderExpertTaskBoard() {
+    const board = el("expertTaskBoard");
+    if (!board) {
+        return;
+    }
+    const groups = [
+        { title: "Open expert tasks", className: "triage", matcher: (task) => !["RESOLVED", "CLOSED"].includes(task.status) },
+        { title: "Closed expert tasks", className: "closed", matcher: (task) => ["RESOLVED", "CLOSED"].includes(task.status) }
+    ];
+    board.innerHTML = groups.map((group) => {
+        const tasks = (state.tasks || []).filter(group.matcher);
+        return `
+            <section class="queue-column ${group.className}">
+                <h4>${group.title}</h4>
+                <div class="queue-stack">
+                    ${tasks.length ? tasks.map(renderTaskCard).join("") : `<div class="empty-state">No tasks here.</div>`}
+                </div>
+            </section>
+        `;
+    }).join("");
+    board.querySelectorAll(".task-card").forEach((card) => {
+        card.addEventListener("click", () => selectTask(card.dataset.taskId).catch(handleError));
+    });
+}
+
 function renderTaskCard(task) {
     const active = state.selectedTaskId === task.task_id ? "active" : "";
     const missingData = !task.policy_id && !task.claim_id;
     const jtbdCopy = task.customer_jtbd_type_name ? ` • JTBD ${task.customer_jtbd_type_name}` : "";
+    const tierCopy = task.execution_tier ? ` • ${task.execution_tier}` : "";
 
     return `
         <article class="task-card ${active}" data-task-id="${task.task_id}">
@@ -645,7 +830,7 @@ function renderTaskCard(task) {
                 <span class="badge">${task.source_channel}</span>
                 <span class="badge">${task.status}</span>
             </div>
-            <p class="task-supporting">${task.customer_id} • ${task.issue_type || "unclassified"} • ${task.assigned_queue || "triage"}${jtbdCopy}</p>
+            <p class="task-supporting">${task.customer_id} • ${task.issue_type || "unclassified"} • ${task.assigned_queue || "triage"}${jtbdCopy}${tierCopy}</p>
         </article>
     `;
 }
@@ -655,40 +840,94 @@ function renderAgentWorkspace() {
     if (!heading) {
         return;
     }
+    if (!state.agentWorkspace) {
+        clearWorkspace();
+        return;
+    }
+
+    heading.textContent = `${state.agentWorkspace.customer_id} • ${((state.agentWorkspace.emails || [])[0]) || ((state.agentWorkspace.phones || [])[0]) || "customer selected"}`;
+    const meta = el("taskMeta");
+    if (meta) {
+        meta.innerHTML = [
+            badge(state.agentWorkspace.primary_channel || "UI"),
+            badge(`${filteredAgentJtbds().length} JTBDs`),
+            badge(`${filteredAgentTasks().length} tasks`),
+            state.selectedTaskId ? badge(`Reply target ${state.selectedTaskId}`) : badge("No task selected")
+        ].join("");
+    }
+    const jtbdMeta = el("taskJtbdMeta");
+    if (jtbdMeta) {
+        jtbdMeta.textContent = state.agentDomainFilter === "ALL"
+            ? "Full conversation is visible here. Narrow to a domain when you want a focused working view."
+            : `Domain-focused view on ${state.agentDomainFilter}. Switch back to All domains for the full conversation.`;
+    }
+
+    const filteredMessages = filteredAgentMessages();
+    const filteredDocuments = filteredAgentDocuments();
+    text("timelineCount", `${filteredMessages.length} messages in view`);
+    text("documentCount", `${filteredDocuments.length} docs`);
+    renderChatThread("messageTimeline", filteredMessages, false);
+    renderDocumentsFromList("documentList", filteredDocuments, "Documents shared from any channel appear here.");
+    renderAgentJtbds();
+    renderAgentTasks();
+    renderAgentAssignments();
+    renderAgentHandlingSessions();
+    syncFormsWithTask();
+    text(
+        "agentReplyTargetNote",
+        state.selectedTaskId
+            ? `Replies are added to the shared conversation and anchored to ${state.selectedTaskId}.`
+            : "Replies are added to the shared conversation. The newest open task will be used if one exists."
+    );
+}
+
+function renderExpertWorkspace() {
+    const heading = el("expertTaskHeading");
+    if (!heading) {
+        return;
+    }
     if (!state.currentTask) {
         clearWorkspace();
         return;
     }
 
-    heading.textContent = `${state.currentTask.task_id} • ${state.currentTask.issue_type || "unclassified"}`;
-    const meta = el("taskMeta");
+    heading.textContent = `${state.currentTask.task_id} • ${state.currentTask.issue_type || "expert task"}`;
+    const meta = el("expertTaskMeta");
     if (meta) {
         meta.innerHTML = [
-            badge(state.currentTask.source_channel),
+            badge(state.currentTask.execution_tier || "EXPERT"),
+            badge(state.currentTask.task_type || "EXPERT_TASK"),
             badge(state.currentTask.status),
-            badge(state.currentTask.assigned_queue || "triage"),
-            state.currentTask.policy_id ? badge(`Policy ${state.currentTask.policy_id}`) : "",
-            state.currentTask.claim_id ? badge(`Claim ${state.currentTask.claim_id}`) : ""
+            badge(state.currentTask.assigned_queue || "queue-triage"),
+            state.currentTask.assigned_agent ? badge(`Owner ${state.currentTask.assigned_agent}`) : badge("Unassigned")
         ].join("");
     }
-    const jtbdMeta = el("taskJtbdMeta");
+    const jtbdMeta = el("expertTaskJtbdMeta");
     if (jtbdMeta) {
         jtbdMeta.textContent = state.currentTask.customer_jtbd_id
-            ? `JTBD ${state.currentTask.customer_jtbd_type_name} • Stage ${state.currentTask.customer_jtbd_stage_name} • ${state.currentTask.customer_jtbd_status}`
-            : "No JTBD linked to this task.";
+            ? `Linked JTBD ${state.currentTask.customer_jtbd_type_name} • Stage ${state.currentTask.customer_jtbd_stage_name} • ${state.currentTask.customer_jtbd_status}`
+            : "No JTBD linked to this expert task.";
     }
-
-    text("timelineCount", `${state.messages.length} messages`);
-    text("documentCount", `${state.documents.length} docs`);
-    renderChatThread("messageTimeline", state.messages, false);
-    renderDocuments();
+    const scopeNote = el("expertScopeNote");
+    if (scopeNote) {
+        scopeNote.textContent = state.expertMessageScope === "conversation"
+            ? "You are seeing the broader customer conversation for additional context."
+            : "Messages shown here are narrowed to the linked JTBD when possible.";
+    }
+    setScopeButtonState();
+    text("expertDocumentCount", `${state.documents.length} docs`);
+    renderChatThread("expertMessageTimeline", state.messages, false);
+    renderDocumentsIn("expertDocumentList", "Relevant evidence and attachments appear here.");
 }
 
 function filteredAgentTasks() {
-    if (state.view !== "agent" || state.agentCustomerFilter === "ALL") {
+    if (state.view !== "agent") {
         return state.tasks;
     }
-    return (state.tasks || []).filter((task) => task.customer_id === state.agentCustomerFilter);
+    if (state.agentDomainFilter === "ALL") {
+        return state.tasks || [];
+    }
+    return (state.tasks || []).filter((task) => domainForTask(task) === state.agentDomainFilter);
 }
 
 function populateAgentCustomerFilter() {
@@ -696,14 +935,148 @@ function populateAgentCustomerFilter() {
     if (!select || state.view !== "agent") {
         return;
     }
-    const customers = [...new Set((state.tasks || []).map((task) => task.customer_id))].sort();
-    const current = state.agentCustomerFilter || "ALL";
+    const customers = (state.agentCustomers || []).map((customer) => customer.customer_id).sort();
+    const current = state.agentCustomerFilter || "";
     select.innerHTML = `
-        <option value="ALL">All customers</option>
+        <option value="">Choose customer</option>
         ${customers.map((customerId) => `<option value="${escapeHtml(customerId)}">${escapeHtml(customerId)}</option>`).join("")}
     `;
-    select.value = customers.includes(current) ? current : "ALL";
+    select.value = customers.includes(current) ? current : "";
     state.agentCustomerFilter = select.value;
+}
+
+function populateAgentDomainFilter() {
+    const select = el("agentDomainFilter");
+    if (!select) {
+        return;
+    }
+    const domains = state.agentWorkspace?.domains || [];
+    select.innerHTML = `
+        <option value="ALL">All domains</option>
+        ${domains.map((domain) => `<option value="${escapeHtml(domain)}">${escapeHtml(domain)}</option>`).join("")}
+    `;
+    select.value = domains.includes(state.agentDomainFilter) ? state.agentDomainFilter : "ALL";
+    state.agentDomainFilter = select.value;
+}
+
+function renderAgentCustomerList() {
+    const container = el("agentCustomerList");
+    if (!container) {
+        return;
+    }
+    const customers = state.agentCustomers || [];
+    if (!customers.length) {
+        container.className = "queue-stack empty-state";
+        container.textContent = "No customers yet.";
+        return;
+    }
+    container.className = "queue-stack";
+    container.innerHTML = customers.map((customer) => `
+        <article class="task-card ${customer.customer_id === state.agentCustomerFilter ? "active" : ""}" data-agent-customer-id="${customer.customer_id}">
+            <div class="bubble-meta">
+                <strong>${escapeHtml(customer.customer_id)}</strong>
+                <span class="badge">${customer.active_jtbd_count} active JTBDs</span>
+            </div>
+            <p class="task-supporting">${[...(customer.emails || []), ...(customer.phones || [])].join(" • ") || "No identifiers"}</p>
+            <div class="bubble-meta">
+                <span class="badge">${customer.task_count} tasks</span>
+            </div>
+        </article>
+    `).join("");
+    container.querySelectorAll("[data-agent-customer-id]").forEach((card) => {
+        card.addEventListener("click", () => selectAgentCustomer(card.dataset.agentCustomerId).catch(handleError));
+    });
+}
+
+function renderAgentJtbds() {
+    const container = el("agentJtbdList");
+    if (!container) {
+        return;
+    }
+    const jtbds = filteredAgentJtbds();
+    if (!jtbds.length) {
+        container.className = "queue-stack empty-state";
+        container.textContent = "No JTBDs on this customer yet.";
+        return;
+    }
+    container.className = "queue-stack";
+    container.innerHTML = jtbds.map((jtbd) => `
+        <article class="task-card mapping-card customer-jtbd-card">
+            <div class="bubble-meta">
+                <strong>${escapeHtml(jtbd.jtbd_type_name)}</strong>
+                <span class="badge">${escapeHtml(jtbd.status)}</span>
+            </div>
+            <p class="task-supporting">${escapeHtml(jtbd.current_stage_name)} • ${escapeHtml(jtbd.public_id)}</p>
+        </article>
+    `).join("");
+}
+
+function renderAgentTasks() {
+    const container = el("agentTaskList");
+    if (!container) {
+        return;
+    }
+    const tasks = filteredAgentTasks();
+    if (!tasks.length) {
+        container.className = "queue-stack empty-state";
+        container.textContent = "No tasks on this customer yet.";
+        return;
+    }
+    container.className = "queue-stack";
+    container.innerHTML = tasks.map(renderTaskCard).join("");
+    container.querySelectorAll(".task-card").forEach((card) => {
+        card.addEventListener("click", () => {
+            persistTaskId(card.dataset.taskId);
+            state.currentTask = (state.tasks || []).find((task) => task.task_id === card.dataset.taskId) || null;
+            renderAgentWorkspace();
+        });
+    });
+}
+
+function renderAgentAssignments() {
+    const container = el("agentAssignmentList");
+    if (!container) {
+        return;
+    }
+    const assignments = filteredAgentAssignments();
+    if (!assignments.length) {
+        container.className = "queue-stack empty-state";
+        container.textContent = "No routing assignments yet.";
+        return;
+    }
+    container.className = "queue-stack";
+    container.innerHTML = assignments.map((assignment) => `
+        <article class="task-card mapping-card">
+            <div class="bubble-meta">
+                <strong>${escapeHtml(assignment.assigned_group)}</strong>
+                <span class="badge">${escapeHtml(assignment.status)}</span>
+            </div>
+            <p class="task-supporting">${escapeHtml(assignment.assigned_agent || "Unassigned")} • ${formatDate(assignment.assigned_at)}</p>
+        </article>
+    `).join("");
+}
+
+function renderAgentHandlingSessions() {
+    const container = el("agentHandlingSessionList");
+    if (!container) {
+        return;
+    }
+    const sessions = filteredAgentHandlingSessions();
+    if (!sessions.length) {
+        container.className = "queue-stack empty-state";
+        container.textContent = "No handling sessions yet.";
+        return;
+    }
+    container.className = "queue-stack";
+    container.innerHTML = sessions.map((session) => `
+        <article class="task-card mapping-card">
+            <div class="bubble-meta">
+                <strong>${escapeHtml(session.assigned_group)}</strong>
+                <span class="badge">${session.end_at ? "Ended" : "Active"}</span>
+            </div>
+            <p class="task-supporting">${escapeHtml(session.assigned_agent || "Unassigned")} • ${formatDate(session.start_at)}${session.end_at ? ` to ${formatDate(session.end_at)}` : ""}</p>
+        </article>
+    `).join("");
 }
 
 function renderCustomerExperience() {
@@ -715,16 +1088,21 @@ function renderCustomerExperience() {
         customerHeading.textContent = "Your support conversation";
         text("customerAppSubhead", "Your customer journey now stays in one continuous thread across app, email, and WhatsApp.");
         text("customerStatusPill", "Ready");
+        renderChatThread("customerConversationThread", [], true);
+        renderDocumentsIn("customerDocumentList", "Relevant documents will appear here.");
+        text("customerDocumentCount", "0 docs");
         return;
     }
 
     customerHeading.textContent = state.currentRequest.title || "Selected request";
     text(
         "customerAppSubhead",
-        "The expanded request shows the full customer journey, including email, WhatsApp, app updates, and documents."
+        "This view keeps your full customer conversation together while also showing the visible requests, progress, and relevant documents."
     );
     text("customerStatusPill", state.currentRequest.status_label || "Active");
-    setStartSupportCollapsed(true);
+    renderChatThread("customerConversationThread", state.messages, true);
+    renderDocumentsIn("customerDocumentList", "Relevant documents will appear here.");
+    text("customerDocumentCount", `${state.documents.length} docs`);
 }
 
 function renderCustomerTaskList() {
@@ -732,19 +1110,15 @@ function renderCustomerTaskList() {
     if (!container) {
         return;
     }
-    const requests = state.customerRequests || [];
-    text("customerTaskCount", `${requests.length} conversation${requests.length === 1 ? "" : "s"}`);
-    if (!requests.length) {
+    const jtbds = state.currentRequest?.jtbds || [];
+    text("customerTaskCount", `${jtbds.length} JTBD${jtbds.length === 1 ? "" : "s"}`);
+    if (!jtbds.length) {
         container.className = "queue-stack empty-state";
-        container.textContent = "No conversation yet.";
+        container.textContent = "No visible JTBDs yet.";
         return;
     }
     container.className = "queue-stack";
-    container.innerHTML = requests.map(renderCustomerTaskAccordion).join("");
-    container.querySelectorAll(".customer-task-header").forEach((card) => {
-        card.addEventListener("click", () => toggleCustomerTask(card.dataset.requestId).catch(handleError));
-    });
-    hydrateExpandedCustomerTask(container);
+    container.innerHTML = jtbds.map((jtbd) => renderCustomerJtbdCard(jtbd)).join("");
 }
 
 function renderChatThread(containerId, messages, customerView) {
@@ -759,7 +1133,7 @@ function renderChatThreadInElement(container, messages, customerView) {
     if (!messages.length) {
         container.className = `chat-thread ${customerView ? "customer-view" : "agent-view"} empty-state`;
         container.textContent = customerView
-            ? "No request loaded in the app yet."
+            ? "No conversation yet."
             : "Select a task to load the full conversation.";
         return;
     }
@@ -769,69 +1143,33 @@ function renderChatThreadInElement(container, messages, customerView) {
     messages.forEach((message) => container.appendChild(buildMessageNode(message, customerView)));
 }
 
-function renderCustomerTaskAccordion(request) {
-    const active = state.selectedRequestId === request.request_id;
-    const statusTone = request.status_label === "Completed" ? "good" : "warning";
+function renderCustomerJtbdCard(jtbd) {
+    const statusTone = jtbd.completed ? "good" : "warning";
     return `
-        <article class="task-card customer-task-card ${active ? "active expanded" : ""}" data-request-id="${request.request_id}">
-            <button type="button" class="customer-task-header" data-request-id="${request.request_id}">
-                <div class="customer-task-summary">
-                    <div class="bubble-meta">
-                        <strong>${escapeHtml(request.title || "Request")}</strong>
-                        <span class="status-pill ${statusTone}">${escapeHtml(request.status_label || "Active")}</span>
-                    </div>
-                    <div class="bubble-meta">
-                        <span class="badge">${escapeHtml(request.stage_label || "Open")}</span>
-                        <span class="badge">${request.source_channel}</span>
-                        <span class="badge">Conversation</span>
-                    </div>
-                    <p class="task-supporting">${request.jtbd_type_name || "Shared customer thread"} • ${request.internal_task_count} internal work item${request.internal_task_count === 1 ? "" : "s"}</p>
-                </div>
-                <span class="customer-task-chevron">${active ? "Hide" : "Open"}</span>
-            </button>
-            ${active ? `
-                <div class="customer-task-body" data-task-body="${request.request_id}">
-                    <div class="customer-task-details">
-                        <span class="badge">Conversation ${escapeHtml(request.stage_label || "Open")}</span>
-                        <span class="badge">Status ${escapeHtml(request.status_label || "Active")}</span>
-                        ${request.jtbd_type_name ? `<span class="badge">${escapeHtml(request.jtbd_type_name)}</span>` : ""}
-                    </div>
-                    <div class="chat-thread customer-task-chat empty-state">Loading conversation...</div>
-                    <form id="customerComposeForm" class="stack-form compact customer-compose-form">
-                        <label>
-                            Message
-                            <textarea name="body" rows="4" required>I want to continue on this same conversation.</textarea>
-                        </label>
-                        <label>
-                            Attach documents
-                            <input name="attachments" type="file" multiple>
-                        </label>
-                        <p class="small-note">For email responses, reply directly from your inbox and we will keep everything in this same conversation.</p>
-                        <button type="submit">Send update to this conversation</button>
-                    </form>
-                </div>
-            ` : ""}
+        <article class="task-card mapping-card customer-jtbd-card">
+            <div class="bubble-meta">
+                <strong>${escapeHtml(jtbd.jtbd_type_name || "Request")}</strong>
+                <span class="status-pill ${statusTone}">${escapeHtml(jtbd.completed ? "Completed" : "Active")}</span>
+            </div>
+            <div class="bubble-meta">
+                <span class="badge">${escapeHtml(jtbd.stage_name || "Open")}</span>
+                <span class="badge">${escapeHtml(jtbd.status || "ACTIVE")}</span>
+            </div>
+            <p class="task-supporting">${escapeHtml(jtbd.jtbd_id)}</p>
         </article>
     `;
-}
-
-function hydrateExpandedCustomerTask(container) {
-    if (!container || !state.currentRequest || state.selectedRequestId !== state.currentRequest.request_id) {
-        return;
-    }
-    const body = container.querySelector(`[data-task-body="${state.currentRequest.request_id}"]`);
-    if (!body) {
-        return;
-    }
-    const chatContainer = body.querySelector(".customer-task-chat");
-    renderChatThreadInElement(chatContainer, state.messages, true);
-    bindDynamicCustomerComposeForm(body.querySelector("#customerComposeForm"));
 }
 
 function buildMessageNode(message, customerView) {
     const template = document.getElementById("messageTemplate");
     const node = template.content.firstElementChild.cloneNode(true);
-    const senderClass = message.sender_type === "AGENT" ? "agent" : message.sender_type === "CUSTOMER" ? "customer" : "system";
+    const senderClass = message.sender_type === "AGENT"
+        ? "agent"
+        : message.sender_type === "CUSTOMER"
+            ? "customer"
+            : message.sender_type === "EXPERT"
+                ? "expert"
+                : "system";
     node.classList.add(senderClass);
     node.querySelector(".bubble-meta").innerHTML = [
         badge(channelLabel(message.channel)),
@@ -850,24 +1188,32 @@ function buildMessageNode(message, customerView) {
 }
 
 function renderDocuments() {
-    const container = el("documentList");
+    renderDocumentsIn("documentList", "Documents shared from any channel appear here.");
+}
+
+function renderDocumentsIn(containerId, emptyCopy) {
+    renderDocumentsFromList(containerId, state.documents, emptyCopy);
+}
+
+function renderDocumentsFromList(containerId, documents, emptyCopy) {
+    const container = el(containerId);
     const template = document.getElementById("documentTemplate");
     if (!container || !template) {
         return;
     }
-    if (!state.documents.length) {
+    if (!documents.length) {
         container.className = "document-list empty-state";
-        container.textContent = "Documents shared from any channel appear here.";
+        container.textContent = emptyCopy;
         return;
     }
 
     container.className = "document-list";
     container.innerHTML = "";
-    state.documents.forEach((documentItem) => {
+    documents.forEach((documentItem) => {
         const node = template.content.firstElementChild.cloneNode(true);
         node.querySelector(".document-type").textContent = documentItem.document_type;
         node.querySelector(".document-meta").textContent =
-            `${channelLabel(documentItem.source_channel)} • ${documentItem.policy_id || "No policy"} • ${documentItem.claim_id || "No claim"}`;
+            `${channelLabel(documentItem.source_channel)} • ${documentItem.customer_jtbd_type_name || "General"} • ${documentItem.policy_id || "No policy"} • ${documentItem.claim_id || "No claim"}`;
         const link = node.querySelector(".document-link");
         link.href = documentItem.file_url;
         container.appendChild(node);
@@ -876,9 +1222,12 @@ function renderDocuments() {
 
 function syncFormsWithTask() {
     if (!state.currentTask) {
+        setFormValue("#patchForm [name='status']", "");
         return;
     }
     setFormValue("#patchForm [name='status']", state.currentTask.status || "");
+    setFormValue("#expertPatchForm [name='status']", state.currentTask.status || "");
+    setFormValue("#expertPatchForm [name='assignedAgent']", state.currentTask.assigned_agent || "");
 }
 
 function clearWorkspace() {
@@ -889,18 +1238,43 @@ function clearWorkspace() {
         persistRequestId(null);
         renderCustomerExperience();
         renderCustomerTaskList();
-        setStartSupportCollapsed(false);
         return;
     }
-    text("taskHeading", "Select a task");
+    if (state.view === "expert") {
+        text("expertTaskHeading", "Select an expert task");
+        html("expertTaskMeta", "");
+        text("expertTaskJtbdMeta", "");
+        text("expertScopeNote", "Messages shown here are narrowed to the linked JTBD when possible.");
+        renderChatThread("expertMessageTimeline", [], false);
+        const documentList = el("expertDocumentList");
+        if (documentList) {
+            documentList.className = "document-list empty-state";
+            documentList.textContent = "Relevant evidence and attachments appear here.";
+        }
+        state.currentTask = null;
+        state.messages = [];
+        state.documents = [];
+        persistTaskId(null);
+        return;
+    }
+    text("taskHeading", state.view === "agent" ? "Select a customer" : "Select a task");
     html("taskMeta", "");
     text("taskJtbdMeta", "");
     renderChatThread("messageTimeline", [], false);
-    renderChatThread("customerChat", [], true);
     const documentList = el("documentList");
     if (documentList) {
         documentList.className = "document-list empty-state";
         documentList.textContent = "Documents shared from any channel appear here.";
+    }
+    if (state.view === "agent") {
+        html("agentJtbdList", "No JTBDs on this customer yet.");
+        html("agentTaskList", "No tasks on this customer yet.");
+        html("agentAssignmentList", "No routing assignments yet.");
+        html("agentHandlingSessionList", "No handling sessions yet.");
+        text("timelineCount", "Select a customer to load the full conversation.");
+        text("documentCount", "0 docs");
+        text("agentReplyTargetNote", "Replies are added to the shared conversation and anchored to the selected task when one is available.");
+        state.agentWorkspace = null;
     }
     state.currentTask = null;
     state.messages = [];
@@ -908,25 +1282,6 @@ function clearWorkspace() {
     persistTaskId(null);
     renderCustomerExperience();
     renderCustomerTaskList();
-    setStartSupportCollapsed(false);
-}
-
-function toggleStartSupport() {
-    const body = el("startSupportBody");
-    if (!body) {
-        return;
-    }
-    setStartSupportCollapsed(!body.classList.contains("collapsed"));
-}
-
-function setStartSupportCollapsed(collapsed) {
-    const body = el("startSupportBody");
-    const button = el("toggleStartSupport");
-    if (!body || !button) {
-        return;
-    }
-    body.classList.toggle("collapsed", collapsed);
-    button.textContent = collapsed ? "Open new request" : "Hide new request form";
 }
 
 function pushEvent(title, copy) {
@@ -1130,18 +1485,41 @@ function ensureTaskSelected() {
     }
 }
 
-async function submitCustomerComposeForm(event) {
-    if (!state.selectedRequestId) {
-        throw new Error("Select a request first.");
+function ensureAgentCustomerSelected() {
+    if (!state.agentCustomerFilter) {
+        throw new Error("Select a customer first.");
     }
+}
+
+async function submitCustomerComposeForm(event) {
     const data = new FormData(event.currentTarget);
     const body = data.get("body");
     const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
+    let requestId = state.selectedRequestId;
+
+    if (!requestId) {
+        const created = await api("/v1/customers/me/requests", {
+            method: "POST",
+            body: {
+                issue_type: "general_support_request",
+                lob: null,
+                claim_id: null,
+                policy_id: null,
+                priority: "MEDIUM",
+                source_channel: "UI",
+                initial_message_body: body,
+                sender_identifier: state.user.email,
+                initial_message_metadata: { source: "customer_conversation" },
+                initial_external_thread_ref: `ui-${Date.now()}`
+            }
+        });
+        requestId = created.data.request_id;
+    }
 
     if (uploadedFiles.length) {
         for (let index = 0; index < uploadedFiles.length; index += 1) {
             const file = uploadedFiles[index];
-            await api(`/v1/customers/me/requests/${encodeURIComponent(state.selectedRequestId)}/documents`, {
+            await api(`/v1/customers/me/requests/${encodeURIComponent(requestId)}/documents`, {
                 method: "POST",
                 body: pruneEmpty({
                     channel: "UI",
@@ -1160,7 +1538,7 @@ async function submitCustomerComposeForm(event) {
             });
         }
     } else {
-        await api(`/v1/customers/me/requests/${encodeURIComponent(state.selectedRequestId)}/messages`, {
+        await api(`/v1/customers/me/requests/${encodeURIComponent(requestId)}/messages`, {
             method: "POST",
             body: {
                 channel: "UI",
@@ -1173,23 +1551,8 @@ async function submitCustomerComposeForm(event) {
         });
     }
 
-    pushEvent("Customer continued an existing request", "A new customer update was added to the same request journey.");
-    await refreshBoard(state.selectedRequestId);
-}
-
-function bindDynamicCustomerComposeForm(form) {
-    if (!form || form.dataset.bound === "true") {
-        return;
-    }
-    form.dataset.bound = "true";
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        try {
-            await submitCustomerComposeForm(event);
-        } catch (error) {
-            handleError(error);
-        }
-    });
+    pushEvent("Customer conversation updated", "Your message and any documents were added to the same customer conversation.");
+    await refreshBoard(requestId);
 }
 
 function handleError(error) {
@@ -1271,6 +1634,101 @@ function syncUserIdentity() {
     text("jtbdIdentity", state.user.roles && state.user.roles.includes("ROLE_ADMIN")
         ? `Signed in as ${state.user.name || state.user.email}`
         : state.user.email);
+    text("expertIdentity", state.user.roles && state.user.roles.includes("ROLE_EXPERT")
+        ? `Signed in as ${state.user.name || state.user.email}`
+        : state.user.email);
+}
+
+function resolveAgentSelectedTask(workspace) {
+    const current = state.selectedTaskId;
+    if (current && (workspace.tasks || []).some((task) => task.task_id === current)) {
+        return current;
+    }
+    return workspace.default_task_id || null;
+}
+
+function filteredAgentJtbds() {
+    const all = state.agentWorkspace?.jtbds || [];
+    if (state.agentDomainFilter === "ALL") {
+        return all;
+    }
+    const jtbdIds = new Set(filteredAgentTasks().map((task) => task.customer_jtbd_id).filter(Boolean));
+    return all.filter((jtbd) => jtbdIds.has(jtbd.public_id));
+}
+
+function filteredAgentMessages() {
+    const all = state.agentWorkspace?.messages || [];
+    if (state.agentDomainFilter === "ALL") {
+        return all;
+    }
+    const taskIds = new Set(filteredAgentTasks().map((task) => task.task_id));
+    const jtbdIds = new Set(filteredAgentJtbds().map((jtbd) => jtbd.public_id));
+    return all.filter((message) => taskIds.has(message.task_id) || (message.customer_jtbd_id && jtbdIds.has(message.customer_jtbd_id)));
+}
+
+function filteredAgentDocuments() {
+    const all = state.agentWorkspace?.documents || [];
+    if (state.agentDomainFilter === "ALL") {
+        return all;
+    }
+    const taskIds = new Set(filteredAgentTasks().map((task) => task.task_id));
+    const jtbdIds = new Set(filteredAgentJtbds().map((jtbd) => jtbd.public_id));
+    return all.filter((documentItem) => taskIds.has(documentItem.task_id) || (documentItem.customer_jtbd_id && jtbdIds.has(documentItem.customer_jtbd_id)));
+}
+
+function filteredAgentAssignments() {
+    const all = state.agentWorkspace?.assignments || [];
+    if (state.agentDomainFilter === "ALL") {
+        return all;
+    }
+    return all.filter((assignment) => humanizeDomain(assignment.assigned_group) === state.agentDomainFilter);
+}
+
+function filteredAgentHandlingSessions() {
+    const all = state.agentWorkspace?.handling_sessions || [];
+    if (state.agentDomainFilter === "ALL") {
+        return all;
+    }
+    return all.filter((session) => humanizeDomain(session.assigned_group) === state.agentDomainFilter);
+}
+
+function domainForTask(task) {
+    return humanizeDomain(task.assigned_queue || task.lob || "General");
+}
+
+function humanizeDomain(value) {
+    const normalized = `${value || ""}`
+        .replace("queue-", "")
+        .replaceAll("_", " ")
+        .replaceAll("-", " ")
+        .trim()
+        .toLowerCase();
+    if (!normalized) {
+        return "General";
+    }
+    return normalized.replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+async function setExpertMessageScope(scope) {
+    if (state.expertMessageScope === scope) {
+        return;
+    }
+    state.expertMessageScope = scope;
+    setScopeButtonState();
+    if (state.view === "expert" && state.selectedTaskId) {
+        await selectTask(state.selectedTaskId);
+    }
+}
+
+function setScopeButtonState() {
+    const relevant = el("expertScopeRelevant");
+    const conversation = el("expertScopeConversation");
+    if (relevant) {
+        relevant.classList.toggle("active", state.expertMessageScope === "relevant");
+    }
+    if (conversation) {
+        conversation.classList.toggle("active", state.expertMessageScope === "conversation");
+    }
 }
 
 function el(id) {

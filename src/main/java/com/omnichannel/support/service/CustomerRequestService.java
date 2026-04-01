@@ -11,6 +11,7 @@ import com.omnichannel.support.domain.TaskStatus;
 import com.omnichannel.support.dto.CreateAuthenticatedTaskRequest;
 import com.omnichannel.support.dto.CreateTaskRequest;
 import com.omnichannel.support.dto.CustomerRequestDto;
+import com.omnichannel.support.dto.CustomerVisibleJtbdDto;
 import com.omnichannel.support.dto.DocumentDto;
 import com.omnichannel.support.dto.MessageDto;
 import com.omnichannel.support.dto.PostMessageRequest;
@@ -18,6 +19,7 @@ import com.omnichannel.support.dto.RegisterDocumentRequest;
 import com.omnichannel.support.error.NotFoundException;
 import com.omnichannel.support.error.ValidationException;
 import com.omnichannel.support.repo.CustomerJtbdRepository;
+import com.omnichannel.support.repo.MessageRepository;
 import com.omnichannel.support.repo.TaskMergeMapRepository;
 import com.omnichannel.support.repo.TaskRepository;
 import java.util.ArrayList;
@@ -40,10 +42,12 @@ public class CustomerRequestService {
     private final TaskResolutionService taskResolutionService;
     private final TaskService taskService;
     private final CustomerJtbdRepository customerJtbdRepository;
+    private final MessageRepository messageRepository;
     private final JtbdService jtbdService;
     private final CustomerConversationService customerConversationService;
     private final ConversationService conversationService;
     private final DocumentService documentService;
+    private final DocumentLinkService documentLinkService;
 
     @Transactional(readOnly = true)
     public List<CustomerRequestDto> listRequestsForCustomer(String customerId) {
@@ -62,12 +66,18 @@ public class CustomerRequestService {
     @Transactional(readOnly = true)
     public List<MessageDto> listMessages(String customerId, String requestId) {
         RequestAggregate aggregate = resolveRequest(customerId, requestId);
+        if (CustomerRequestIds.isConversationRequest(requestId)) {
+            return conversationService.listTimeline(aggregate.conversation);
+        }
         return conversationService.listTimeline(aggregate.conversation, aggregate.customerJtbd);
     }
 
     @Transactional(readOnly = true)
     public List<DocumentDto> listDocuments(String customerId, String requestId) {
         RequestAggregate aggregate = resolveRequest(customerId, requestId);
+        if (CustomerRequestIds.isConversationRequest(requestId)) {
+            return documentService.listByConversation(aggregate.conversation, null);
+        }
         return documentService.listByConversation(aggregate.conversation, aggregate.customerJtbd);
     }
 
@@ -150,7 +160,7 @@ public class CustomerRequestService {
                 request.claimId(),
                 request.policyId(),
                 request.metadata());
-        conversationService.appendMessage(
+        MessageDto message = conversationService.appendMessage(
                 aggregate.conversation,
                 aggregate.customerJtbd,
                 null,
@@ -163,6 +173,12 @@ public class CustomerRequestService {
                 List.of(doc.fileUrl()),
                 null,
                 Map.of("attachment_ids", List.of(doc.documentId())));
+        documentLinkService.link(
+                documentService.getByPublicId(doc.documentId()),
+                null,
+                messageRepository.findByPublicId(message.messageId()).orElse(null),
+                aggregate.customerJtbd,
+                null);
         return doc;
     }
 
@@ -379,6 +395,14 @@ public class CustomerRequestService {
                     customerJtbd != null ? customerJtbd.getJtbdType().getName() : null,
                     customerJtbd != null ? customerJtbd.getCurrentStage().getStageName() : null,
                     customerJtbd != null ? customerJtbd.getStatus().name() : null,
+                    customerJtbds.stream()
+                            .map(jtbd -> new CustomerVisibleJtbdDto(
+                                    jtbd.getPublicId(),
+                                    jtbd.getJtbdType().getName(),
+                                    jtbd.getCurrentStage().getStageName(),
+                                    jtbd.getStatus().name(),
+                                    jtbd.getStatus() == JtbdInstanceStatus.COMPLETED))
+                            .toList(),
                     tasks.size(),
                     createdAt,
                     updatedAt);

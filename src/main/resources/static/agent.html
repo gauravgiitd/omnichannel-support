@@ -27,7 +27,7 @@
         <div class="surface-head">
             <div>
                 <p class="eyebrow">Agent UI</p>
-                <h2>Queue board and task chat</h2>
+                <h2>Customer conversation workspace</h2>
             </div>
             <span class="small-note" id="agentIdentity">Signed in with Google</span>
         </div>
@@ -36,27 +36,27 @@
             <section class="panel">
                 <div class="panel-head">
                     <div>
-                        <p class="eyebrow">Routing</p>
-                        <h3>Queue overview</h3>
+                        <p class="eyebrow">Customers</p>
+                        <h3>Select a customer</h3>
                     </div>
                     <div class="filter-inline">
                         <label>
-                            Customer filter
+                            Customer
                             <select id="agentCustomerFilter">
-                                <option value="ALL">All customers</option>
+                                <option value="">Choose customer</option>
                             </select>
                         </label>
                     </div>
                 </div>
                 <div class="metric-grid" id="metrics"></div>
-                <div class="board-grid" id="queueBoard"></div>
+                <div id="agentCustomerList" class="queue-stack empty-state">No customers yet.</div>
             </section>
 
             <section class="panel">
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Agent Workspace</p>
-                        <h3 id="taskHeading">Select a task</h3>
+                        <h3 id="taskHeading">Select a customer</h3>
                     </div>
                     <div id="taskMeta" class="task-meta"></div>
                 </div>
@@ -66,15 +66,23 @@
                     <div class="workspace-column">
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Conversation chat</h4>
-                                <span id="timelineCount" class="small-note">0 messages</span>
+                                <h4>Conversation</h4>
+                                <div class="filter-inline">
+                                    <label>
+                                        Domain focus
+                                        <select id="agentDomainFilter">
+                                            <option value="ALL">All domains</option>
+                                        </select>
+                                    </label>
+                                </div>
                             </div>
-                            <div id="messageTimeline" class="chat-thread empty-state">Select a task to load the full conversation.</div>
+                            <p id="timelineCount" class="small-note">Select a customer to load the full conversation.</p>
+                            <div id="messageTimeline" class="chat-thread empty-state">Select a customer to load the full conversation.</div>
                         </div>
 
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Document layer</h4>
+                                <h4>Relevant documents</h4>
                                 <span id="documentCount" class="small-note">0 docs</span>
                             </div>
                             <div id="documentList" class="document-list empty-state">Documents shared from any channel appear here.</div>
@@ -84,13 +92,43 @@
                     <div class="workspace-column">
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Reply as agent</h4>
+                                <h4>Visible JTBDs</h4>
+                            </div>
+                            <div id="agentJtbdList" class="queue-stack empty-state">No JTBDs on this customer yet.</div>
+                        </div>
+
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Visible tasks</h4>
+                            </div>
+                            <div id="agentTaskList" class="queue-stack empty-state">No tasks on this customer yet.</div>
+                        </div>
+
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Routing and handling</h4>
+                            </div>
+                            <div class="stack-form compact">
+                                <div>
+                                    <strong>Assignments</strong>
+                                    <div id="agentAssignmentList" class="queue-stack empty-state">No routing assignments yet.</div>
+                                </div>
+                                <div>
+                                    <strong>Handling sessions</strong>
+                                    <div id="agentHandlingSessionList" class="queue-stack empty-state">No handling sessions yet.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Respond and add documents</h4>
                             </div>
                             <form id="replyForm" class="stack-form compact">
-                                <p class="small-note">Replies are added to the shared task thread from your logged-in agent account.</p>
+                                <p class="small-note" id="agentReplyTargetNote">Replies are added to the shared conversation and anchored to the selected task when one is available.</p>
                                 <label>
                                     Message
-                                    <textarea name="body" rows="4" required>I can see your email and WhatsApp documents on the same task. The policy servicing team is handling this now.</textarea>
+                                    <textarea name="body" rows="4" required>I can see the latest updates and supporting documents in this customer conversation.</textarea>
                                 </label>
                                 <label>
                                     Attach documents
@@ -102,18 +140,22 @@
 
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Task status</h4>
+                                <h4>Selected task status</h4>
                             </div>
                             <form id="patchForm" class="stack-form compact">
-                                <p class="small-note">Use this only when the task is ready to be closed.</p>
+                                <p class="small-note">Update the selected task when operational work changes state.</p>
                                 <label>
                                     Status
                                     <select name="status">
                                         <option value="">Leave unchanged</option>
+                                        <option value="ASSIGNED">ASSIGNED</option>
+                                        <option value="PENDING_INTERNAL">PENDING_INTERNAL</option>
+                                        <option value="PENDING_CUSTOMER">PENDING_CUSTOMER</option>
+                                        <option value="RESOLVED">RESOLVED</option>
                                         <option value="CLOSED">CLOSED</option>
                                     </select>
                                 </label>
-                                <button type="submit">Update task</button>
+                                <button type="submit">Update selected task</button>
                             </form>
                         </div>
                     </div>

@@ -7,6 +7,8 @@ import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.PendingSelectionType;
 import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Task;
+import com.omnichannel.support.domain.TaskType;
+import com.omnichannel.support.domain.ExecutionTier;
 import com.omnichannel.support.domain.TaskPriority;
 import com.omnichannel.support.dto.CreateTaskRequest;
 import com.omnichannel.support.dto.DocumentDto;
@@ -47,7 +49,11 @@ public class InboundWhatsAppService {
     private final JtbdService jtbdService;
     private final CustomerConversationContextService customerConversationContextService;
     private final CustomerChannelNotificationService customerChannelNotificationService;
+    private final AssignmentService assignmentService;
+    private final DocumentLinkService documentLinkService;
+    private final RoutingService routingService;
     private final AuditService auditService;
+    private final InboundMessageUnderstandingService inboundMessageUnderstandingService;
 
     @Transactional
     public InboundWhatsAppResult ingest(InboundWhatsAppRequest request) {
@@ -105,7 +111,7 @@ public class InboundWhatsAppService {
                 throw new ValidationException("JTBD does not belong to resolved customer");
             }
             customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, jtbd.getPublicId());
-            return appendToConversation(customerId, jtbd, request);
+            return appendToConversation(customerId, jtbd, request, null);
         }
 
         Optional<CustomerConversationContextService.PendingSelection> pendingSelection =
@@ -118,7 +124,7 @@ public class InboundWhatsAppService {
         if (isSwitchToJtbdRequest(request.bodyText()) && !activeJtbds.isEmpty()) {
             if (activeJtbds.size() == 1) {
                 customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, activeJtbds.get(0).getPublicId());
-                return appendToConversation(customerId, activeJtbds.get(0), request);
+                return appendToConversation(customerId, activeJtbds.get(0), request, null);
             }
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
@@ -129,7 +135,41 @@ public class InboundWhatsAppService {
 
         Optional<CustomerJtbd> activeJtbd = activeContextJtbd(customerId);
         if (activeJtbd.isPresent()) {
-            return appendToConversation(customerId, activeJtbd.get(), request);
+            InboundMessageUnderstandingService.InboundDecision decision =
+                    inboundMessageUnderstandingService.analyze(
+                            request.bodyText(),
+                            request.claimIdHint(),
+                            request.policyIdHint(),
+                            request.attachmentUrls() != null && !request.attachmentUrls().isEmpty(),
+                            activeJtbds);
+            if (decision.createExpertTask()) {
+                return createExpertTask(request, customerId, activeJtbd.get(), decision);
+            }
+            return appendToConversation(customerId, activeJtbd.get(), request, decision.assignedQueue());
+        }
+
+        InboundMessageUnderstandingService.InboundDecision decision =
+                inboundMessageUnderstandingService.analyze(
+                        request.bodyText(),
+                        request.claimIdHint(),
+                        request.policyIdHint(),
+                        request.attachmentUrls() != null && !request.attachmentUrls().isEmpty(),
+                        activeJtbds);
+        if (decision.createNewJtbd()) {
+            CustomerJtbd createdJtbd =
+                    inboundMessageUnderstandingService.createCustomerJtbd(
+                            customerId, decision.newJtbdTypeName(), jtbdService);
+            customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, createdJtbd.getPublicId());
+            return decision.createExpertTask()
+                    ? createExpertTask(request, customerId, createdJtbd, decision)
+                    : appendToConversation(customerId, createdJtbd, request, decision.assignedQueue());
+        }
+        if (decision.matchedJtbd() != null) {
+            customerConversationContextService.setActiveJtbd(
+                    customerId, ChannelType.WHATSAPP, decision.matchedJtbd().getPublicId());
+            return decision.createExpertTask()
+                    ? createExpertTask(request, customerId, decision.matchedJtbd(), decision)
+                    : appendToConversation(customerId, decision.matchedJtbd(), request, decision.assignedQueue());
         }
 
         if (!activeJtbds.isEmpty()) {
@@ -142,11 +182,11 @@ public class InboundWhatsAppService {
             }
             if (activeJtbds.size() == 1) {
                 customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, activeJtbds.get(0).getPublicId());
-                return appendToConversation(customerId, activeJtbds.get(0), request);
+                return appendToConversation(customerId, activeJtbds.get(0), request, decision.assignedQueue());
             }
         }
 
-        return appendToConversation(customerId, null, request);
+        return appendToConversation(customerId, null, request, decision.assignedQueue());
     }
 
     private Optional<Task> activeContextTask(String customerId) {
@@ -183,6 +223,7 @@ public class InboundWhatsAppService {
                         request.waMessageId(),
                         metadata);
         customerConversationContextService.setActiveTask(customerId, ChannelType.WHATSAPP, task.getTaskNumber());
+        linkDocumentsToMessage(documents, message, task.getCustomerJtbd(), task);
         auditService.record(
                 "INBOUND_WHATSAPP_APPENDED",
                 "Task",
@@ -194,7 +235,7 @@ public class InboundWhatsAppService {
     }
 
     private InboundWhatsAppResult appendToConversation(
-            String customerId, CustomerJtbd customerJtbd, InboundWhatsAppRequest request) {
+            String customerId, CustomerJtbd customerJtbd, InboundWhatsAppRequest request, String assignedGroup) {
         Conversation conversation = customerConversationService.getOrCreate(customerId, ChannelType.WHATSAPP);
         List<DocumentDto> documents = registerWhatsAppDocuments(conversation, customerJtbd, customerId, request);
         List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
@@ -224,6 +265,7 @@ public class InboundWhatsAppService {
             customerConversationContextService.clearActiveTask(customerId, ChannelType.WHATSAPP);
             customerConversationContextService.clearActiveJtbd(customerId, ChannelType.WHATSAPP);
         }
+        linkDocumentsToMessage(documents, message, customerJtbd, null);
         auditService.record(
                 "INBOUND_WHATSAPP_CONVERSATION_APPENDED",
                 "Conversation",
@@ -231,7 +273,60 @@ public class InboundWhatsAppService {
                 "SYSTEM",
                 "whatsapp-adapter",
                 Map.of("message_id", message.messageId()));
+        assignmentService.assign(
+                conversation,
+                messageRepository.findByPublicId(message.messageId()).orElse(null),
+                assignedGroup != null ? assignedGroup : deriveAssignedGroup(customerJtbd),
+                null);
         return new InboundWhatsAppResult(null, message.messageId(), InboundOutcome.APPENDED);
+    }
+
+    private InboundWhatsAppResult createExpertTask(
+            InboundWhatsAppRequest request,
+            String customerId,
+            CustomerJtbd customerJtbd,
+            InboundMessageUnderstandingService.InboundDecision decision) {
+        Map<String, Object> metadata = buildWaMetadata(request);
+        metadata.put("customer_jtbd_id", customerJtbd.getPublicId());
+        metadata.put("jtbd_type", customerJtbd.getJtbdType().getName());
+        Task task = taskService.createInternalTask(
+                new CreateTaskRequest(
+                        customerId,
+                        decision.taskIssueType() != null ? decision.taskIssueType() : "expert_follow_up",
+                        decision.domain().name().toLowerCase(Locale.ROOT),
+                        blankToNull(request.claimIdHint()),
+                        blankToNull(request.policyIdHint()),
+                        TaskPriority.MEDIUM,
+                        ChannelType.WHATSAPP,
+                        request.bodyText(),
+                        request.fromE164Phone(),
+                        metadata,
+                        request.waMessageId()),
+                customerJtbd,
+                TaskType.EXPERT_TASK,
+                ExecutionTier.EXPERT,
+                decision.assignedQueue());
+
+        List<DocumentDto> documents = registerWhatsAppDocuments(task, customerId, request);
+        List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
+        List<String> urls = documents.stream().map(DocumentDto::fileUrl).toList();
+        conversationService.enrichLatestMessageWithInboundFiles(task, urls, docIds);
+        MessageDto latest = latestMessage(task);
+        linkDocumentsToMessage(documents, latest, customerJtbd, task);
+        customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, customerJtbd.getPublicId());
+        auditService.record(
+                "INBOUND_WHATSAPP_EXPERT_TASK_CREATED",
+                "Task",
+                task.getTaskNumber(),
+                "SYSTEM",
+                "whatsapp-adapter",
+                Map.of("customer_jtbd_id", customerJtbd.getPublicId()));
+        return new InboundWhatsAppResult(task.getTaskNumber(), latest != null ? latest.messageId() : null, InboundOutcome.CREATED);
+    }
+
+    private MessageDto latestMessage(Task task) {
+        List<MessageDto> timeline = conversationService.listTimeline(task);
+        return timeline.isEmpty() ? null : timeline.get(timeline.size() - 1);
     }
 
     private InboundWhatsAppResult createNewTask(
@@ -265,6 +360,7 @@ public class InboundWhatsAppService {
         List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
         List<String> urls = documents.stream().map(DocumentDto::fileUrl).toList();
         conversationService.enrichLatestMessageWithInboundFiles(task, urls, docIds);
+        linkDocumentsToMessage(documents, latestMessage(task), customerJtbd, task);
         customerConversationContextService.setActiveTask(customerId, ChannelType.WHATSAPP, task.getTaskNumber());
 
         auditService.record(
@@ -604,6 +700,39 @@ public class InboundWhatsAppService {
     private static void assertCustomerOwns(String customerId, Task task) {
         if (!task.getCustomerId().equals(customerId)) {
             throw new ValidationException("task does not belong to resolved customer");
+        }
+    }
+
+    private String deriveAssignedGroup(CustomerJtbd customerJtbd) {
+        if (customerJtbd != null) {
+            return taskRepository.findByCustomerJtbdIdOrderByCreatedAtDesc(customerJtbd.getId()).stream()
+                    .map(Task::getAssignedQueue)
+                    .filter(value -> value != null && !value.isBlank())
+                    .findFirst()
+                    .orElse(routingService.resolveQueue(
+                            RoutingContext.builder()
+                                    .issueType(customerJtbd.getJtbdType().getName())
+                                    .build()));
+        }
+        return routingService.resolveQueue(
+                RoutingContext.builder()
+                        .issueType("general_support_request")
+                        .build());
+    }
+
+    private void linkDocumentsToMessage(
+            List<DocumentDto> documents, MessageDto message, CustomerJtbd customerJtbd, Task task) {
+        if (documents == null || documents.isEmpty() || message == null) {
+            return;
+        }
+        var savedMessage = messageRepository.findByPublicId(message.messageId()).orElse(null);
+        for (DocumentDto document : documents) {
+            documentLinkService.link(
+                    documentService.getByPublicId(document.documentId()),
+                    null,
+                    savedMessage,
+                    customerJtbd,
+                    task);
         }
     }
 

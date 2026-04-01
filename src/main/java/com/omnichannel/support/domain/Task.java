@@ -58,6 +58,14 @@ public class Task {
     private TaskPriority priority;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "task_type", length = 32)
+    private TaskType taskType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "execution_tier", length = 32)
+    private ExecutionTier executionTier;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "source_channel", nullable = false, length = 32)
     private ChannelType sourceChannel;
 

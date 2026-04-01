@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expert Task Workspace</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body data-view="expert">
+<div class="page-shell">
+    <header class="hero">
+        <div>
+            <p class="eyebrow">Domain Expert Experience</p>
+            <p class="hero-copy">
+                Experts work from assigned internal tasks, with the linked JTBD, the most relevant message slice,
+                and the shared document evidence all available in one focused workspace.
+            </p>
+        </div>
+        <div class="hero-actions">
+            <button type="button" class="ghost-button" id="refreshBoard">Refresh workspace</button>
+            <a class="route-link" href="/agent">Agent UI</a>
+            <a class="route-link" href="/logout">Sign out</a>
+        </div>
+    </header>
+
+    <section class="surface expert-surface">
+        <div class="surface-head">
+            <div>
+                <p class="eyebrow">Expert UI</p>
+                <h2>Task-first expert workspace</h2>
+            </div>
+            <span class="small-note" id="expertIdentity">Signed in with Google</span>
+        </div>
+
+        <div class="subgrid">
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Expert Queue</p>
+                        <h3>Assigned expert tasks</h3>
+                    </div>
+                </div>
+                <div class="metric-grid" id="metrics"></div>
+                <div class="board-grid" id="expertTaskBoard"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Expert Workspace</p>
+                        <h3 id="expertTaskHeading">Select an expert task</h3>
+                    </div>
+                    <div id="expertTaskMeta" class="task-meta"></div>
+                </div>
+                <div id="expertTaskJtbdMeta" class="task-jtbd-strip small-note"></div>
+
+                <div class="agent-workspace">
+                    <div class="workspace-column">
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Messages</h4>
+                                <div class="scope-toggle">
+                                    <button type="button" class="ghost-button scope-button active" id="expertScopeRelevant">Relevant slice</button>
+                                    <button type="button" class="ghost-button scope-button" id="expertScopeConversation">Broader conversation</button>
+                                </div>
+                            </div>
+                            <p id="expertScopeNote" class="small-note">Messages shown here are narrowed to the linked JTBD when possible.</p>
+                            <div id="expertMessageTimeline" class="chat-thread empty-state">Select an expert task to load messages.</div>
+                        </div>
+
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Documents</h4>
+                                <span id="expertDocumentCount" class="small-note">0 docs</span>
+                            </div>
+                            <div id="expertDocumentList" class="document-list empty-state">Relevant evidence and attachments appear here.</div>
+                        </div>
+                    </div>
+
+                    <div class="workspace-column">
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Add expert update</h4>
+                            </div>
+                            <form id="expertReplyForm" class="stack-form compact">
+                                <p class="small-note">These notes stay inside the internal support record until an agent communicates a customer-safe update back out.</p>
+                                <label>
+                                    Message
+                                    <textarea name="body" rows="4" required>I reviewed the linked evidence and updated the execution notes for this task.</textarea>
+                                </label>
+                                <label>
+                                    Attach documents
+                                    <input name="attachments" type="file" multiple>
+                                </label>
+                                <button type="submit">Save expert update</button>
+                            </form>
+                        </div>
+
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Task progress</h4>
+                            </div>
+                            <form id="expertPatchForm" class="stack-form compact">
+                                <label>
+                                    Assigned expert
+                                    <input name="assignedAgent" type="email" placeholder="expert@company.com">
+                                </label>
+                                <label>
+                                    Status
+                                    <select name="status">
+                                        <option value="">Leave unchanged</option>
+                                        <option value="ASSIGNED">ASSIGNED</option>
+                                        <option value="PENDING_INTERNAL">PENDING_INTERNAL</option>
+                                        <option value="PENDING_CUSTOMER">PENDING_CUSTOMER</option>
+                                        <option value="RESOLVED">RESOLVED</option>
+                                        <option value="CLOSED">CLOSED</option>
+                                    </select>
+                                </label>
+                                <button type="submit">Update expert task</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </section>
+</div>
+
+<template id="messageTemplate">
+    <article class="chat-bubble">
+        <div class="bubble-meta"></div>
+        <p class="bubble-body"></p>
+        <div class="bubble-attachments"></div>
+    </article>
+</template>
+
+<template id="documentTemplate">
+    <article class="document-card">
+        <div>
+            <strong class="document-type"></strong>
+            <p class="document-meta"></p>
+        </div>
+        <a class="document-link" target="_blank" rel="noreferrer">Open file</a>
+    </article>
+</template>
+
+<script src="/app.js" defer></script>
+</body>
+</html>

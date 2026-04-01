@@ -26,7 +26,7 @@
         <div class="surface-head">
             <div>
                 <p class="eyebrow">Customer UI</p>
-                <h2>Channels and app inbox</h2>
+                <h2>Your support journey</h2>
             </div>
             <div class="customer-chip">
                 <span id="customerIdentityLabel">Customer</span>
@@ -38,60 +38,52 @@
             <section class="panel">
                 <div class="panel-head">
                     <div>
-                        <p class="eyebrow">Start Support</p>
-                        <h3>Customer conversation</h3>
+                        <p class="eyebrow">Conversation</p>
+                        <h3 id="customerAppHeading">Your support conversation</h3>
                     </div>
                     <div class="actions-inline">
-                        <button type="button" class="ghost-button" id="toggleStartSupport">Open new request</button>
                         <button type="button" class="ghost-button" id="refreshBoard">Refresh</button>
                     </div>
                 </div>
-
-                <div id="startSupportBody">
-                    <div class="tab-row">
-                        <button class="tab-button active" data-tab="app-message">In-App Message</button>
+                <div class="customer-app-shell customer-thread-shell">
+                    <div class="app-header-strip">
+                        <div>
+                            <strong>One continuous thread</strong>
+                            <p id="customerAppSubhead">Your customer journey stays in one continuous thread across app, email, and WhatsApp.</p>
+                        </div>
+                        <span class="status-pill good" id="customerStatusPill">Ready</span>
                     </div>
-
-                    <div class="tab-panel active" data-panel="app-message">
-                        <form id="appForm" class="stack-form">
+                    <div id="customerConversationThread" class="chat-thread customer-view empty-state">No conversation yet.</div>
+                    <form id="customerComposeForm" class="stack-form compact customer-compose-form">
                         <label>
-                            In-app message
-                            <textarea name="initialMessageBody" rows="4" required>I need help with a new request from the app.</textarea>
+                            Message
+                            <textarea name="body" rows="4" required>I want to continue on this same conversation.</textarea>
                         </label>
-                            <label>
-                                Attach documents
-                                <input name="attachments" type="file" multiple>
-                            </label>
-                            <div class="form-footer">
-                                <p>Use this section only when a brand-new customer request needs to be created inside the same conversation.</p>
-                                <button type="submit">Start new request in this conversation</button>
-                            </div>
-                        </form>
-                    </div>
+                        <label>
+                            Attach documents
+                            <input name="attachments" type="file" multiple>
+                        </label>
+                        <p class="small-note">Reply here to continue the same customer conversation. Email replies from your inbox will also appear in this same thread.</p>
+                        <button type="submit">Send message and documents</button>
+                    </form>
                 </div>
             </section>
 
             <section class="panel">
-                <div class="panel-head">
-                    <div>
-                        <p class="eyebrow">Customer App</p>
-                        <h3 id="customerAppHeading">Your support conversation</h3>
-                    </div>
-                </div>
                 <div class="customer-app-shell">
-                    <div class="app-header-strip">
-                        <div>
-                            <strong>Support conversation</strong>
-                            <p id="customerAppSubhead">Your customer journey stays in one continuous thread, even when multiple requests exist over time.</p>
-                        </div>
-                        <span class="status-pill good" id="customerStatusPill">Ready</span>
-                    </div>
                     <div class="subpanel task-list-shell">
                         <div class="subpanel-head">
-                            <h4>Your conversation</h4>
-                            <span id="customerTaskCount" class="small-note">0 conversations</span>
+                            <h4>Visible requests and progress</h4>
+                            <span id="customerTaskCount" class="small-note">0 JTBDs</span>
                         </div>
-                        <div id="customerTaskList" class="queue-stack empty-state">No conversation yet.</div>
+                        <div id="customerTaskList" class="queue-stack empty-state">No JTBDs yet.</div>
+                    </div>
+                    <div class="subpanel">
+                        <div class="subpanel-head">
+                            <h4>Relevant documents</h4>
+                            <span id="customerDocumentCount" class="small-note">0 docs</span>
+                        </div>
+                        <div id="customerDocumentList" class="document-list empty-state">Relevant documents will appear here.</div>
                     </div>
                 </div>
             </section>
@@ -104,6 +96,16 @@
         <div class="bubble-meta"></div>
         <p class="bubble-body"></p>
         <div class="bubble-attachments"></div>
+    </article>
+</template>
+
+<template id="documentTemplate">
+    <article class="document-card">
+        <div>
+            <strong class="document-type"></strong>
+            <p class="document-meta"></p>
+        </div>
+        <a class="document-link" target="_blank" rel="noreferrer">Open file</a>
     </article>
 </template>
 

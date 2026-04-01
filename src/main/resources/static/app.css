@@ -179,6 +179,10 @@ label {
     background: linear-gradient(180deg, rgba(233, 248, 244, 0.78), rgba(255, 251, 246, 0.9));
 }
 
+.expert-surface {
+    background: linear-gradient(180deg, rgba(237, 238, 255, 0.86), rgba(255, 251, 246, 0.9));
+}
+
 .surface-head,
 .panel-head,
 .subpanel-head,
@@ -193,6 +197,17 @@ label {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+}
+
+.scope-toggle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.scope-button.active {
+    background: var(--ink);
+    color: #fff;
 }
 
 .customer-chip {
@@ -487,6 +502,11 @@ label {
     background: var(--chat-outgoing);
 }
 
+.chat-bubble.expert {
+    justify-self: end;
+    background: #eef0ff;
+}
+
 .chat-bubble.system {
     justify-self: center;
     width: min(88%, 680px);
@@ -512,6 +532,12 @@ label {
 .chat-thread.agent-view .chat-bubble.agent {
     justify-self: end;
     background: var(--chat-outgoing);
+}
+
+.chat-thread.agent-view .chat-bubble.expert,
+.chat-thread.customer-view .chat-bubble.expert {
+    justify-self: start;
+    background: #eef0ff;
 }
 
 .bubble-meta {

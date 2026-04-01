@@ -49,6 +49,10 @@ public class Message {
     @Column(name = "sender_type", nullable = false, length = 32)
     private SenderType senderType;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "intent_type", length = 32)
+    private MessageIntentType intentType;
+
     @Column(name = "sender_identifier", nullable = false, length = 512)
     private String senderIdentifier;
 

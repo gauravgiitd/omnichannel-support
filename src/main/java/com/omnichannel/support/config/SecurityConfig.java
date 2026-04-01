@@ -2,6 +2,7 @@ package com.omnichannel.support.config;
 
 import com.omnichannel.support.security.AgentAccessService;
 import com.omnichannel.support.security.AdminAccessService;
+import com.omnichannel.support.security.ExpertAccessService;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     private final AgentAccessService agentAccessService;
+    private final ExpertAccessService expertAccessService;
     private final AdminAccessService adminAccessService;
 
     @Bean
@@ -42,7 +44,9 @@ public class SecurityConfig {
                         .permitAll()
                         .requestMatchers("/admin", "/admin.html", "/jtbd", "/jtbd.html", "/v1/admin/**")
                         .hasRole("ADMIN")
-                        .requestMatchers("/agent", "/v1/tasks", "/v1/tasks/merge")
+                        .requestMatchers("/expert", "/expert.html", "/v1/expert/**")
+                        .hasAnyRole("EXPERT", "ADMIN")
+                        .requestMatchers("/agent", "/v1/agent/**", "/v1/tasks", "/v1/tasks/merge")
                         .hasAnyRole("AGENT", "ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.PATCH, "/v1/tasks/**")
                         .hasAnyRole("AGENT", "ADMIN")
@@ -69,6 +73,9 @@ public class SecurityConfig {
             authorities.add(new SimpleGrantedAuthority("ROLE_CUSTOMER"));
             if (agentAccessService.isAllowedAgent(user.getEmail())) {
                 authorities.add(new SimpleGrantedAuthority("ROLE_AGENT"));
+            }
+            if (expertAccessService.isAllowedExpert(user.getEmail())) {
+                authorities.add(new SimpleGrantedAuthority("ROLE_EXPERT"));
             }
             if (adminAccessService.isAllowedAdmin(user.getEmail())) {
                 authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));

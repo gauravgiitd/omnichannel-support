@@ -27,6 +27,7 @@ public class DocumentService {
     private final ObjectMapper objectMapper;
     private final AuditService auditService;
     private final GoogleDriveStorageService googleDriveStorageService;
+    private final DocumentLinkService documentLinkService;
 
     @Transactional(readOnly = true)
     public List<DocumentDto> listByTask(Task task) {
@@ -96,6 +97,7 @@ public class DocumentService {
         doc.setSourceChannel(sourceChannel);
         doc.setMetadataJson(toJson(resolvedMetadata));
         TaskDocument saved = taskDocumentRepository.save(doc);
+        documentLinkService.link(saved, conversation, null, customerJtbd, task);
 
         auditService.record(
                 "DOCUMENT_REGISTERED",
@@ -149,6 +151,8 @@ public class DocumentService {
         return new DocumentDto(
                 doc.getPublicId(),
                 doc.getTask() != null ? doc.getTask().getTaskNumber() : null,
+                doc.getCustomerJtbd() != null ? doc.getCustomerJtbd().getPublicId() : null,
+                doc.getCustomerJtbd() != null ? doc.getCustomerJtbd().getJtbdType().getName() : null,
                 doc.getCustomerId(),
                 doc.getClaimId(),
                 doc.getPolicyId(),

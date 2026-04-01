@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import com.omnichannel.support.domain.ChannelType;
 import java.time.Instant;
+import java.util.List;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record CustomerRequestDto(
@@ -18,6 +19,7 @@ public record CustomerRequestDto(
         String jtbdTypeName,
         String jtbdStageName,
         String jtbdStatus,
+        List<CustomerVisibleJtbdDto> jtbds,
         long internalTaskCount,
         Instant createdAt,
         Instant updatedAt) {}

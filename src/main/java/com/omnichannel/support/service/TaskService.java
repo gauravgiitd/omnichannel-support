@@ -2,8 +2,10 @@ package com.omnichannel.support.service;
 
 import com.omnichannel.support.domain.ChannelType;
 import com.omnichannel.support.domain.CustomerJtbd;
+import com.omnichannel.support.domain.ExecutionTier;
 import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Task;
+import com.omnichannel.support.domain.TaskType;
 import com.omnichannel.support.domain.TaskStatus;
 import com.omnichannel.support.dto.CreateTaskRequest;
 import com.omnichannel.support.dto.DocumentDto;
@@ -14,6 +16,7 @@ import com.omnichannel.support.dto.RegisterDocumentRequest;
 import com.omnichannel.support.dto.TaskDto;
 import com.omnichannel.support.error.NotFoundException;
 import com.omnichannel.support.error.ValidationException;
+import com.omnichannel.support.repo.MessageRepository;
 import com.omnichannel.support.repo.TaskMergeMapRepository;
 import com.omnichannel.support.repo.TaskRepository;
 import java.util.EnumSet;
@@ -41,13 +44,17 @@ public class TaskService {
                     TaskStatus.REOPENED);
 
     private final TaskRepository taskRepository;
+    private final MessageRepository messageRepository;
     private final TaskMergeMapRepository taskMergeMapRepository;
     private final TaskNumberGenerator taskNumberGenerator;
     private final CustomerConversationService customerConversationService;
     private final ConversationService conversationService;
     private final TaskResolutionService taskResolutionService;
+    private final AssignmentService assignmentService;
+    private final HandlingSessionService handlingSessionService;
     private final AuditService auditService;
     private final DocumentService documentService;
+    private final DocumentLinkService documentLinkService;
     private final RoutingService routingService;
     private final TaskEmailNotificationService taskEmailNotificationService;
     private final TaskOriginReplyService taskOriginReplyService;
@@ -59,11 +66,42 @@ public class TaskService {
 
     @Transactional
     public TaskDto createTask(CreateTaskRequest request, CustomerJtbd customerJtbd) {
+        Task task = createTaskEntity(
+                request,
+                customerJtbd,
+                TaskType.AGENT_TASK,
+                ExecutionTier.AGENT,
+                null,
+                true,
+                true);
+        return toDto(task);
+    }
+
+    @Transactional
+    public Task createInternalTask(
+            CreateTaskRequest request,
+            CustomerJtbd customerJtbd,
+            TaskType taskType,
+            ExecutionTier executionTier,
+            String assignedQueue) {
+        return createTaskEntity(request, customerJtbd, taskType, executionTier, assignedQueue, false, false);
+    }
+
+    private Task createTaskEntity(
+            CreateTaskRequest request,
+            CustomerJtbd customerJtbd,
+            TaskType taskType,
+            ExecutionTier executionTier,
+            String explicitAssignedQueue,
+            boolean sendCustomerNotification,
+            boolean auditAsExternalCreate) {
         Task task = new Task();
         task.setTaskNumber(taskNumberGenerator.newTaskNumber());
         task.setCustomerId(request.customerId());
         task.setConversation(customerConversationService.getOrCreate(request.customerId(), request.sourceChannel()));
         task.setCustomerJtbd(customerJtbd);
+        task.setTaskType(taskType);
+        task.setExecutionTier(executionTier);
         task.setIssueType(request.issueType().trim());
         task.setLob(blankToNull(request.lob()));
         task.setClaimId(blankToNull(request.claimId()));
@@ -72,14 +110,16 @@ public class TaskService {
         task.setPriority(request.priority());
         task.setSourceChannel(request.sourceChannel());
         task.setAssignedQueue(
-                routingService.resolveQueue(
-                        RoutingContext.builder()
-                                .issueType(task.getIssueType())
-                                .lob(task.getLob())
-                                .claimId(task.getClaimId())
-                                .policyId(task.getPolicyId())
-                                .customerId(task.getCustomerId())
-                                .build()));
+                explicitAssignedQueue != null && !explicitAssignedQueue.isBlank()
+                        ? explicitAssignedQueue
+                        : routingService.resolveQueue(
+                                RoutingContext.builder()
+                                        .issueType(task.getIssueType())
+                                        .lob(task.getLob())
+                                        .claimId(task.getClaimId())
+                                        .policyId(task.getPolicyId())
+                                        .customerId(task.getCustomerId())
+                                        .build()));
         taskRepository.save(task);
 
         String sender =
@@ -97,9 +137,10 @@ public class TaskService {
                 request.initialMessageMetadata() != null
                         ? request.initialMessageMetadata()
                         : java.util.Map.of());
+        assignmentService.assign(task.getConversation(), null, task.getAssignedQueue(), task.getAssignedAgent());
 
         auditService.record(
-                "TICKET_CREATED",
+                auditAsExternalCreate ? "TICKET_CREATED" : "TASK_CREATED_INTERNAL",
                 "Task",
                 task.getTaskNumber(),
                 "SYSTEM",
@@ -107,12 +148,16 @@ public class TaskService {
                         java.util.Map.of(
                                 "channel",
                                 request.sourceChannel().name(),
+                                "execution_tier",
+                                task.getExecutionTier() != null ? task.getExecutionTier().name() : "",
                                 "assigned_queue",
                                 task.getAssignedQueue() != null ? task.getAssignedQueue() : ""));
 
-        taskEmailNotificationService.sendTaskCreatedNotifications(task);
+        if (sendCustomerNotification) {
+            taskEmailNotificationService.sendTaskCreatedNotifications(task);
+        }
 
-        return toDto(task);
+        return task;
     }
 
     @Transactional
@@ -242,6 +287,12 @@ public class TaskService {
                         effectiveRequest.attachmentUrls() != null ? effectiveRequest.attachmentUrls() : List.of(),
                         effectiveRequest.externalThreadRef(),
                         effectiveRequest.metadata());
+        if (effectiveRequest.senderType() == SenderType.AGENT || effectiveRequest.senderType() == SenderType.EXPERT) {
+            handlingSessionService.startOrContinue(
+                    task.getConversation(),
+                    task.getAssignedQueue() != null ? task.getAssignedQueue() : "queue-triage",
+                    effectiveRequest.senderIdentifier());
+        }
 
         auditService.record(
                 "MESSAGE_APPENDED",
@@ -300,7 +351,7 @@ public class TaskService {
         if (meta.get("recipient") != null) {
             messageMeta.put("recipient", meta.get("recipient"));
         }
-        conversationService.appendMessage(
+        MessageDto message = conversationService.appendMessage(
                 task,
                 request.channel(),
                 request.senderType(),
@@ -309,6 +360,9 @@ public class TaskService {
                 List.of(doc.fileUrl()),
                 null,
                 messageMeta);
+        var savedDocument = documentService.getByPublicId(doc.documentId());
+        var savedMessage = message != null ? messageRepository.findByPublicId(message.messageId()).orElse(null) : null;
+        documentLinkService.link(savedDocument, task.getConversation(), savedMessage, task.getCustomerJtbd(), task);
 
         auditService.record(
                 "DOCUMENT_MESSAGE_APPENDED",
@@ -347,6 +401,48 @@ public class TaskService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<Task> findTasksForCustomerEntities(String customerId) {
+        return taskRepository.findByCustomerIdOrderByCreatedAtDesc(customerId).stream()
+                .filter(t -> !taskMergeMapRepository.existsByMergedTask(t))
+                .map(taskResolutionService::resolveCanonical)
+                .distinct()
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public TaskDto toDtoView(Task task) {
+        return toDto(task);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TaskDto> listExpertTasks(String actorEmail, boolean includeUnassigned) {
+        return taskRepository.findByExecutionTierOrderByCreatedAtDesc(ExecutionTier.EXPERT).stream()
+                .filter(t -> !taskMergeMapRepository.existsByMergedTask(t))
+                .map(taskResolutionService::resolveCanonical)
+                .distinct()
+                .filter(task -> {
+                    if (actorEmail == null || actorEmail.isBlank()) {
+                        return true;
+                    }
+                    if (task.getAssignedAgent() == null || task.getAssignedAgent().isBlank()) {
+                        return includeUnassigned;
+                    }
+                    return task.getAssignedAgent().equalsIgnoreCase(actorEmail);
+                })
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageDto> listRelevantMessages(String taskNumber) {
+        Task task = loadCanonicalTask(taskNumber);
+        if (task.getConversation() == null) {
+            return conversationService.listTimeline(task);
+        }
+        return conversationService.listTimeline(task.getConversation(), task.getCustomerJtbd());
+    }
+
     public Task loadCanonicalTask(String taskNumber) {
         Task task =
                 taskRepository
@@ -363,6 +459,8 @@ public class TaskService {
                 task.getCustomerJtbd() != null ? task.getCustomerJtbd().getJtbdType().getName() : null,
                 task.getCustomerJtbd() != null ? task.getCustomerJtbd().getCurrentStage().getStageName() : null,
                 task.getCustomerJtbd() != null ? task.getCustomerJtbd().getStatus().name() : null,
+                task.getTaskType(),
+                task.getExecutionTier(),
                 task.getIssueType(),
                 task.getLob(),
                 task.getClaimId(),

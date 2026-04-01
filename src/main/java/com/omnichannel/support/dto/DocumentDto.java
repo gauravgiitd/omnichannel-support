@@ -10,6 +10,8 @@ import java.util.Map;
 public record DocumentDto(
         String documentId,
         String taskId,
+        String customerJtbdId,
+        String customerJtbdTypeName,
         String customerId,
         String claimId,
         String policyId,

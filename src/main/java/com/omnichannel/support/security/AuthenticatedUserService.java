@@ -73,10 +73,26 @@ public class AuthenticatedUserService {
     }
 
     public boolean isAgent(Authentication authentication) {
+        return hasRole(authentication, "ROLE_AGENT");
+    }
+
+    public boolean isExpert(Authentication authentication) {
+        return hasRole(authentication, "ROLE_EXPERT");
+    }
+
+    public boolean isAdmin(Authentication authentication) {
+        return hasRole(authentication, "ROLE_ADMIN");
+    }
+
+    public boolean isStaff(Authentication authentication) {
+        return isAgent(authentication) || isExpert(authentication) || isAdmin(authentication);
+    }
+
+    private boolean hasRole(Authentication authentication, String role) {
         return Optional.ofNullable(authentication)
                 .stream()
                 .flatMap(auth -> auth.getAuthorities().stream())
                 .map(GrantedAuthority::getAuthority)
-                .anyMatch("ROLE_AGENT"::equals);
+                .anyMatch(role::equals);
     }
 }

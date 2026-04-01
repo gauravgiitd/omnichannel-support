@@ -12,6 +12,8 @@ import java.util.Map;
 public record MessageDto(
         String messageId,
         String taskId,
+        String customerJtbdId,
+        String customerJtbdTypeName,
         ChannelType channel,
         SenderType senderType,
         String senderIdentifier,

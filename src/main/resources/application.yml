@@ -50,6 +50,8 @@ support:
       allowed-google-groups: ${AGENT_ALLOWED_GOOGLE_GROUPS:}
       workspace-admin-email: ${GOOGLE_WORKSPACE_ADMIN_EMAIL:}
       service-account-json-base64: ${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64:}
+    expert:
+      allowed-emails: ${EXPERT_ALLOWED_EMAILS:}
     admin:
       allowed-emails: ${ADMIN_ALLOWED_EMAILS:}
   gmail-polling:

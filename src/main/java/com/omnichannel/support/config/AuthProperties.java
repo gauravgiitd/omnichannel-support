@@ -8,6 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AuthProperties {
 
     private final Agent agent = new Agent();
+    private final Expert expert = new Expert();
     private final Admin admin = new Admin();
 
     public Agent getAgent() {
@@ -16,6 +17,10 @@ public class AuthProperties {
 
     public Admin getAdmin() {
         return admin;
+    }
+
+    public Expert getExpert() {
+        return expert;
     }
 
     public static class Agent {
@@ -58,6 +63,18 @@ public class AuthProperties {
     }
 
     public static class Admin {
+        private List<String> allowedEmails = new ArrayList<>();
+
+        public List<String> getAllowedEmails() {
+            return allowedEmails;
+        }
+
+        public void setAllowedEmails(List<String> allowedEmails) {
+            this.allowedEmails = allowedEmails;
+        }
+    }
+
+    public static class Expert {
         private List<String> allowedEmails = new ArrayList<>();
 
         public List<String> getAllowedEmails() {
