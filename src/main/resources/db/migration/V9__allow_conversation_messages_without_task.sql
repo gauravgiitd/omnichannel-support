@@ -1,0 +1,2 @@
+ALTER TABLE messages
+    ALTER COLUMN task_id DROP NOT NULL;
