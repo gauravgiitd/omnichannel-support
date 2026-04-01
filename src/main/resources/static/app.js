@@ -50,6 +50,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         startAutoRefresh();
         return;
     }
+    if (state.view === "admin") {
+        await refreshAdminDashboard();
+        startAutoRefresh();
+        return;
+    }
     await refreshBoard();
     startAutoRefresh();
 });
@@ -1171,10 +1176,11 @@ function buildMessageNode(message, customerView) {
                 ? "expert"
                 : "system";
     node.classList.add(senderClass);
+    const senderMeta = renderSenderMeta(message, customerView);
     node.querySelector(".bubble-meta").innerHTML = [
         badge(channelLabel(message.channel)),
-        badge(message.sender_type),
-        `<span class="small-note">${escapeHtml(message.sender_identifier || "unknown")}</span>`,
+        badge(senderMeta.badge),
+        `<span class="small-note">${escapeHtml(senderMeta.detail)}</span>`,
         `<span class="small-note">${formatDate(message.created_at)}</span>`
     ].join("");
     node.querySelector(".bubble-body").textContent = message.body || "";
@@ -1185,6 +1191,64 @@ function buildMessageNode(message, customerView) {
     ];
     node.querySelector(".bubble-attachments").innerHTML = attachments.join("");
     return node;
+}
+
+function renderSenderMeta(message, customerView) {
+    const identifier = message.sender_identifier || "unknown";
+    if (customerView) {
+        if (message.sender_type === "CUSTOMER") {
+            return {
+                badge: "You",
+                detail: state.user?.email || identifier
+            };
+        }
+        if (message.sender_type === "AGENT") {
+            return {
+                badge: "Support",
+                detail: identifier
+            };
+        }
+        if (message.sender_type === "EXPERT") {
+            return {
+                badge: "Expert",
+                detail: identifier
+            };
+        }
+        return {
+            badge: "System",
+            detail: identifier
+        };
+    }
+    if (message.sender_type === "CUSTOMER") {
+        return {
+            badge: identifier,
+            detail: "Customer"
+        };
+    }
+    if (message.sender_type === "AGENT") {
+        return {
+            badge: identifier,
+            detail: "Support"
+        };
+    }
+    if (message.sender_type === "EXPERT") {
+        return {
+            badge: identifier,
+            detail: "Expert"
+        };
+    }
+    return {
+        badge: "System",
+        detail: identifier
+    };
+}
+
+function humanizeSenderType(senderType) {
+    const normalized = `${senderType || ""}`.trim().toLowerCase();
+    if (!normalized) {
+        return "Unknown";
+    }
+    return normalized.replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
 function renderDocuments() {
