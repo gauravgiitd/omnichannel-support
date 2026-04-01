@@ -11,30 +11,33 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import lombok.Getter;
 import lombok.Setter;
 
 @Entity
-@Table(name = "ticket_documents")
+@Table(name = "tasks")
 @Getter
 @Setter
-public class TicketDocument {
+public class Task {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "public_id", nullable = false, unique = true, length = 36)
-    private String publicId;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "ticket_id", nullable = false)
-    private Ticket ticket;
+    @Column(name = "task_number", nullable = false, unique = true, length = 32)
+    private String taskNumber;
 
     @Column(name = "customer_id", nullable = false, length = 64)
     private String customerId;
+
+    @Column(name = "issue_type", nullable = false, length = 128)
+    private String issueType;
+
+    @Column(length = 64)
+    private String lob;
 
     @Column(name = "claim_id", length = 64)
     private String claimId;
@@ -42,26 +45,43 @@ public class TicketDocument {
     @Column(name = "policy_id", length = 64)
     private String policyId;
 
-    @Column(name = "document_type", nullable = false, length = 64)
-    private String documentType;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
+    private TaskStatus status;
 
-    @Column(name = "file_url", nullable = false, length = 2048)
-    private String fileUrl;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
+    private TaskPriority priority;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "source_channel", nullable = false, length = 32)
     private ChannelType sourceChannel;
 
-    @Column(name = "metadata_json", columnDefinition = "TEXT")
-    private String metadataJson;
+    @Column(name = "assigned_queue", length = 128)
+    private String assignedQueue;
+
+    @Column(name = "assigned_agent", length = 128)
+    private String assignedAgent;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "customer_jtbd_id")
+    private CustomerJtbd customerJtbd;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
     @PrePersist
     void onCreate() {
-        if (createdAt == null) {
-            createdAt = Instant.now();
-        }
+        Instant now = Instant.now();
+        createdAt = now;
+        updatedAt = now;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = Instant.now();
     }
 }

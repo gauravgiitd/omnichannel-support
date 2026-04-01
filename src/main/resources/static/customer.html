@@ -39,10 +39,10 @@
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Start Support</p>
-                        <h3>Customer channels</h3>
+                        <h3>Customer requests</h3>
                     </div>
                     <div class="actions-inline">
-                        <button type="button" class="ghost-button" id="toggleStartSupport">Open new ticket</button>
+                        <button type="button" class="ghost-button" id="toggleStartSupport">Open new request</button>
                         <button type="button" class="ghost-button" id="refreshBoard">Refresh</button>
                     </div>
                 </div>
@@ -56,15 +56,15 @@
                         <form id="appForm" class="stack-form">
                         <label>
                             In-app message
-                            <textarea name="initialMessageBody" rows="4" required>I need to open a new support ticket from the app.</textarea>
+                            <textarea name="initialMessageBody" rows="4" required>I need help with a new request from the app.</textarea>
                         </label>
                             <label>
                                 Attach documents
                                 <input name="attachments" type="file" multiple>
                             </label>
                             <div class="form-footer">
-                                <p>Use this section only when a brand-new ticket needs to be created.</p>
-                                <button type="submit">Open new ticket in app</button>
+                                <p>Use this section only when a brand-new customer request needs to be created.</p>
+                                <button type="submit">Open new request in app</button>
                             </div>
                         </form>
                     </div>
@@ -75,23 +75,23 @@
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Customer App</p>
-                        <h3 id="customerAppHeading">Your tickets</h3>
+                        <h3 id="customerAppHeading">Your requests</h3>
                     </div>
                 </div>
                 <div class="customer-app-shell">
                     <div class="app-header-strip">
                         <div>
-                            <strong>Support conversation</strong>
-                            <p id="customerAppSubhead">Click any ticket below to expand its full conversation and continue the thread.</p>
+                            <strong>Request conversation</strong>
+                            <p id="customerAppSubhead">Click any request below to expand its full conversation and continue the journey.</p>
                         </div>
                         <span class="status-pill good" id="customerStatusPill">Ready</span>
                     </div>
-                    <div class="subpanel ticket-list-shell">
+                    <div class="subpanel task-list-shell">
                         <div class="subpanel-head">
-                            <h4>Your tickets</h4>
-                            <span id="customerTicketCount" class="small-note">0 tickets</span>
+                            <h4>Your requests</h4>
+                            <span id="customerTaskCount" class="small-note">0 requests</span>
                         </div>
-                        <div id="customerTicketList" class="queue-stack empty-state">No tickets yet.</div>
+                        <div id="customerTaskList" class="queue-stack empty-state">No requests yet.</div>
                     </div>
                 </div>
             </section>

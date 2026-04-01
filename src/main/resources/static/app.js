@@ -1,22 +1,27 @@
 const STORAGE_KEYS = {
-    ticketId: "omnichannel.ticketId"
+    taskId: "omnichannel.taskId",
+    requestId: "omnichannel.requestId"
 };
 
-const ticketFromUrl = new URLSearchParams(window.location.search).get("ticket");
+const customerUrlParams = new URLSearchParams(window.location.search);
+const requestFromUrl = customerUrlParams.get("request");
+const legacyTaskFromUrl = customerUrlParams.get("task");
 
 const state = {
     view: "landing",
     user: null,
-    tickets: [],
-    customerTickets: [],
+    tasks: [],
+    customerRequests: [],
     contactMappings: [],
     jtbdTypes: [],
     jtbdCustomers: [],
     customerJtbdsByCustomer: {},
     selectedJtbdCustomerId: null,
     agentCustomerFilter: "ALL",
-    selectedTicketId: ticketFromUrl || localStorage.getItem(STORAGE_KEYS.ticketId),
-    currentTicket: null,
+    selectedTaskId: localStorage.getItem(STORAGE_KEYS.taskId),
+    selectedRequestId: normalizeCustomerRequestId(requestFromUrl || legacyTaskFromUrl || localStorage.getItem(STORAGE_KEYS.requestId)),
+    currentTask: null,
+    currentRequest: null,
     messages: [],
     documents: [],
     events: []
@@ -61,7 +66,7 @@ function setupTabs() {
 }
 
 function bindControls() {
-    bindClick("refreshBoard", () => refreshBoard(state.selectedTicketId));
+    bindClick("refreshBoard", () => refreshBoard(state.view === "customer" ? state.selectedRequestId : state.selectedTaskId));
     bindClick("toggleStartSupport", toggleStartSupport);
     bindClick("refreshAdmin", refreshAdminDashboard);
     bindClick("resetContactMappingForm", resetContactMappingForm);
@@ -79,7 +84,7 @@ function bindControls() {
 function bindForms() {
     bindSubmit("appForm", async (event) => {
         const data = new FormData(event.currentTarget);
-        const response = await api("/v1/tickets/me", {
+        const response = await api("/v1/customers/me/requests", {
             method: "POST",
             body: {
                 issue_type: "policy",
@@ -97,7 +102,7 @@ function bindForms() {
 
         const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
         for (const file of uploadedFiles) {
-            await api(`/v1/tickets/${response.data.ticket_id}/documents`, {
+            await api(`/v1/customers/me/requests/${encodeURIComponent(response.data.request_id)}/documents`, {
                 method: "POST",
                 body: {
                     channel: "UI",
@@ -105,7 +110,7 @@ function bindForms() {
                     sender_identifier: state.user.email,
                     file_url: file.file_token,
                     document_type: "customer_upload",
-                    message_body: "Customer uploaded a document while opening the ticket.",
+                    message_body: "Customer uploaded a document while opening the request.",
                     metadata: {
                         source: "customer_app_upload",
                         drive_file_id: driveFileIdFromToken(file.file_token),
@@ -116,20 +121,20 @@ function bindForms() {
             });
         }
 
-        pushEvent("Customer created a new in-app ticket", `${response.data.ticket_id} was created from the app.`);
-        await refreshBoard(response.data.ticket_id);
+        pushEvent("Customer created a new request", `${response.data.title} was opened from the app.`);
+        await refreshBoard(response.data.request_id);
     });
 
     bindSubmit("replyForm", async (event) => {
-        ensureTicketSelected();
+        ensureTaskSelected();
         const data = new FormData(event.currentTarget);
         const body = data.get("body");
         const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
 
-        const messageResponse = await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
+        const messageResponse = await api(`/v1/tasks/${state.selectedTaskId}/messages`, {
             method: "POST",
             body: {
-                channel: state.currentTicket ? state.currentTicket.source_channel : "UI",
+                channel: state.currentTask ? state.currentTask.source_channel : "UI",
                 sender_type: "AGENT",
                 sender_identifier: state.user.email,
                 body,
@@ -139,10 +144,10 @@ function bindForms() {
         });
 
         for (const file of uploadedFiles) {
-            await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
+            await api(`/v1/tasks/${state.selectedTaskId}/documents`, {
                 method: "POST",
                 body: {
-                    channel: state.currentTicket ? state.currentTicket.source_channel : "UI",
+                    channel: state.currentTask ? state.currentTask.source_channel : "UI",
                     sender_type: "AGENT",
                     sender_identifier: state.user.email,
                     file_url: file.file_token,
@@ -158,32 +163,32 @@ function bindForms() {
             });
         }
 
-        const origin = state.currentTicket ? channelLabel(state.currentTicket.source_channel) : "APP";
+        const origin = state.currentTask ? channelLabel(state.currentTask.source_channel) : "APP";
         const deliveryStatus = messageResponse?.data?.metadata?.delivery_status;
         const deliveryError = messageResponse?.data?.metadata?.delivery_error;
         if (deliveryStatus === "failed") {
             pushEvent(
                 "Agent response recorded",
-                `The reply was added to the ticket thread, but delivery to ${origin} failed${deliveryError ? `: ${deliveryError}` : "."}`
+                `The reply was added to the task thread, but delivery to ${origin} failed${deliveryError ? `: ${deliveryError}` : "."}`
             );
         } else {
-            pushEvent("Agent responded", `The reply was delivered to ${origin} and recorded in the shared ticket thread.`);
+            pushEvent("Agent responded", `The reply was delivered to ${origin} and recorded in the shared task thread.`);
         }
-        await refreshBoard(state.selectedTicketId);
+        await refreshBoard(state.selectedTaskId);
     });
 
     bindSubmit("patchForm", async (event) => {
-        ensureTicketSelected();
+        ensureTaskSelected();
         const data = new FormData(event.currentTarget);
-        const response = await api(`/v1/tickets/${state.selectedTicketId}`, {
+        const response = await api(`/v1/tasks/${state.selectedTaskId}`, {
             method: "PATCH",
             body: pruneEmpty({
                 status: data.get("status")
             })
         });
 
-        pushEvent("Ticket updated", `${response.data.ticket_id} is now ${response.data.status}.`);
-        await refreshBoard(response.data.ticket_id);
+        pushEvent("Task updated", `${response.data.task_id} is now ${response.data.status}.`);
+        await refreshBoard(response.data.task_id);
     });
 
     bindSubmit("adminCleanupForm", async (event) => {
@@ -196,7 +201,7 @@ function bindForms() {
         });
         text(
             "adminCleanupResult",
-            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders. Email-to-phone mappings were preserved.`
+            `Deleted ${response.data.deleted_tasks} tasks, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders. Email-to-phone mappings were preserved.`
         );
         await refreshAdminDashboard();
     });
@@ -212,7 +217,7 @@ function bindForms() {
         });
         text(
             "customerCleanupResult",
-            `Deleted ${response.data.deleted_tickets} tickets, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders for ${response.data.customer_id}. Email-to-phone mappings were preserved.`
+            `Deleted ${response.data.deleted_tasks} tasks, ${response.data.deleted_documents} documents, ${response.data.deleted_messages} messages, ${response.data.deleted_identity_links} identity links, ${response.data.deleted_drive_files} Drive files, and ${response.data.deleted_drive_folders} Drive folders for ${response.data.customer_id}. Email-to-phone mappings were preserved.`
         );
         event.currentTarget.reset();
         await refreshAdminDashboard();
@@ -235,16 +240,16 @@ function bindForms() {
         await refreshAdminDashboard();
     });
 
-    bindSubmit("ticketDeliveryDebugForm", async (event) => {
+    bindSubmit("taskDeliveryDebugForm", async (event) => {
         const data = new FormData(event.currentTarget);
-        const ticketId = `${data.get("ticketId") || ""}`.trim();
-        const response = await api(`/v1/admin/tickets/${encodeURIComponent(ticketId)}/delivery-debug`);
+        const taskId = `${data.get("taskId") || ""}`.trim();
+        const response = await api(`/v1/admin/tasks/${encodeURIComponent(taskId)}/delivery-debug`);
         const debug = response.data;
         text(
-            "ticketDeliveryDebugSummary",
-            `Ticket ${debug.ticket_id} belongs to ${debug.customer_id}, started on ${debug.source_channel}, and will currently reply to ${debug.resolved_outbound_recipient || "no resolved recipient"}.`
+            "taskDeliveryDebugSummary",
+            `Task ${debug.task_id} belongs to ${debug.customer_id}, started on ${debug.source_channel}, and will currently reply to ${debug.resolved_outbound_recipient || "no resolved recipient"}.`
         );
-        text("ticketDeliveryDebugResult", JSON.stringify(debug, null, 2));
+        text("taskDeliveryDebugResult", JSON.stringify(debug, null, 2));
     });
 
     bindSubmit("jtbdTypeForm", async (event) => {
@@ -281,23 +286,26 @@ function bindForms() {
     });
 }
 
-async function refreshBoard(preferredTicketId) {
+async function refreshBoard(preferredTaskId) {
     if (state.view === "customer") {
-        const customerResponse = await api("/v1/customers/me/tickets");
-        state.customerTickets = customerResponse.data;
-        state.tickets = customerResponse.data;
+        const customerResponse = await api("/v1/customers/me/requests");
+        state.customerRequests = customerResponse.data;
     } else {
-        const response = await api("/v1/tickets");
-        state.tickets = response.data;
+        const response = await api("/v1/tasks");
+        state.tasks = response.data;
     }
 
     renderMetrics();
     renderQueueBoard();
-    renderCustomerTicketList();
+    renderCustomerTaskList();
 
-    const ticketId = preferredTicketId || state.selectedTicketId || findRelevantTicketId();
-    if (ticketId) {
-        await selectTicket(ticketId);
+    const targetId = preferredTaskId || (state.view === "customer" ? state.selectedRequestId : state.selectedTaskId) || findRelevantTaskId();
+    if (targetId) {
+        if (state.view === "customer") {
+            await selectCustomerRequest(targetId);
+        } else {
+            await selectTask(targetId);
+        }
     } else {
         clearWorkspace();
     }
@@ -341,28 +349,47 @@ async function refreshJtbdDashboard() {
     renderJtbdCustomers();
 }
 
-function findRelevantTicketId() {
-    const list = state.view === "customer" ? state.customerTickets : state.tickets;
-    return list[0] ? list[0].ticket_id : null;
+function findRelevantTaskId() {
+    const list = state.view === "customer" ? state.customerRequests : state.tasks;
+    if (!list[0]) {
+        return null;
+    }
+    return state.view === "customer" ? list[0].request_id : list[0].task_id;
 }
 
-async function selectTicket(ticketId) {
-    persistTicketId(ticketId);
-    const [ticketResponse, messageResponse, documentResponse] = await Promise.all([
-        api(`/v1/tickets/${ticketId}`),
-        api(`/v1/tickets/${ticketId}/messages`),
-        api(`/v1/tickets/${ticketId}/documents`)
+async function selectTask(taskId) {
+    persistTaskId(taskId);
+    const [taskResponse, messageResponse, documentResponse] = await Promise.all([
+        api(`/v1/tasks/${taskId}`),
+        api(`/v1/tasks/${taskId}/messages`),
+        api(`/v1/tasks/${taskId}/documents`)
     ]);
 
-    state.currentTicket = ticketResponse.data;
+    state.currentTask = taskResponse.data;
     state.messages = messageResponse.data;
     state.documents = documentResponse.data;
 
-    syncFormsWithTicket();
+    syncFormsWithTask();
     renderAgentWorkspace();
     renderCustomerExperience();
-    renderCustomerTicketList();
+    renderCustomerTaskList();
     renderQueueBoard();
+}
+
+async function selectCustomerRequest(requestId) {
+    persistRequestId(requestId);
+    const [requestResponse, messageResponse, documentResponse] = await Promise.all([
+        api(`/v1/customers/me/requests/${encodeURIComponent(requestId)}`),
+        api(`/v1/customers/me/requests/${encodeURIComponent(requestId)}/messages`),
+        api(`/v1/customers/me/requests/${encodeURIComponent(requestId)}/documents`)
+    ]);
+
+    state.currentRequest = requestResponse.data;
+    state.messages = messageResponse.data;
+    state.documents = documentResponse.data;
+
+    renderCustomerExperience();
+    renderCustomerTaskList();
 }
 
 function renderMetrics() {
@@ -372,9 +399,9 @@ function renderMetrics() {
     }
 
     const metrics = [
-        { label: "Total tickets", value: state.tickets.length, copy: "All omnichannel issues" },
-        { label: "Open tickets", value: state.tickets.filter((ticket) => !["RESOLVED", "CLOSED"].includes(ticket.status)).length, copy: "Still active with support" },
-        { label: "Customers", value: new Set(state.tickets.map((ticket) => ticket.customer_id)).size, copy: "Customers represented" }
+        { label: "Total tasks", value: state.tasks.length, copy: "All omnichannel issues" },
+        { label: "Open tasks", value: state.tasks.filter((task) => !["RESOLVED", "CLOSED"].includes(task.status)).length, copy: "Still active with support" },
+        { label: "Customers", value: new Set(state.tasks.map((task) => task.customer_id)).size, copy: "Customers represented" }
     ];
 
     metricsEl.innerHTML = metrics.map((metric) => `
@@ -392,13 +419,13 @@ function renderAdminMetrics(summary) {
         return;
     }
     const metrics = [
-        { label: "Tickets", value: summary.tickets, copy: "Total tickets in database" },
-        { label: "Documents", value: summary.documents, copy: "Stored ticket documents" },
+        { label: "Tasks", value: summary.tasks, copy: "Total tasks in database" },
+        { label: "Documents", value: summary.documents, copy: "Stored task documents" },
         { label: "Messages", value: summary.messages, copy: "Conversation messages" },
         { label: "Contact mappings", value: summary.contact_mappings, copy: "Strict email to phone mappings" },
         { label: "Identity links", value: summary.identity_links, copy: "Customer identifiers" },
         { label: "Audit logs", value: summary.audit_logs, copy: "Recorded audit events" },
-        { label: "Merges", value: summary.merges, copy: "Ticket merge mappings" }
+        { label: "Merges", value: summary.merges, copy: "Task merge mappings" }
     ];
     metricsEl.innerHTML = metrics.map((metric) => `
         <article class="metric-card">
@@ -422,12 +449,12 @@ function renderContactMappings() {
     }
     container.className = "queue-stack";
     container.innerHTML = mappings.map((mapping) => `
-        <article class="ticket-card mapping-card" data-mapping-id="${mapping.id}">
+        <article class="task-card mapping-card" data-mapping-id="${mapping.id}">
             <div class="bubble-meta">
                 <strong>${escapeHtml(mapping.email)}</strong>
                 <span class="badge">${escapeHtml(mapping.phone)}</span>
             </div>
-            <p class="ticket-supporting">Updated ${formatDate(mapping.updated_at)}</p>
+            <p class="task-supporting">Updated ${formatDate(mapping.updated_at)}</p>
             <div class="actions-inline">
                 <button type="button" class="ghost-button mapping-edit" data-mapping-id="${mapping.id}">Edit</button>
                 <button type="button" class="ghost-button mapping-delete" data-mapping-id="${mapping.id}">Delete</button>
@@ -454,12 +481,12 @@ function renderJtbdTypes() {
     }
     container.className = "queue-stack";
     container.innerHTML = state.jtbdTypes.map((type) => `
-        <article class="ticket-card mapping-card" data-jtbd-type-id="${type.public_id}">
+        <article class="task-card mapping-card" data-jtbd-type-id="${type.public_id}">
             <div class="bubble-meta">
                 <strong>${escapeHtml(type.name)}</strong>
                 <span class="badge">${type.stages.length} stages</span>
             </div>
-            <p class="ticket-supporting">${escapeHtml(type.description || "No description")}</p>
+            <p class="task-supporting">${escapeHtml(type.description || "No description")}</p>
             <p class="small-note">${type.stages.map((stage) => `${stage.stage_name}${stage.terminal_completed ? " (completed)" : ""}`).join(" -> ")}</p>
             <div class="actions-inline">
                 <button type="button" class="ghost-button jtbd-type-edit" data-jtbd-type-id="${type.public_id}">Edit</button>
@@ -489,22 +516,22 @@ function renderJtbdCustomers() {
     container.innerHTML = state.jtbdCustomers.map((customer) => {
         const instances = state.customerJtbdsByCustomer[customer.customer_id] || [];
         return `
-            <article class="ticket-card customer-ticket-card ${state.selectedJtbdCustomerId === customer.customer_id ? "active expanded" : ""}">
-                <div class="customer-ticket-summary">
+            <article class="task-card customer-task-card ${state.selectedJtbdCustomerId === customer.customer_id ? "active expanded" : ""}">
+                <div class="customer-task-summary">
                     <div class="bubble-meta">
                         <strong>${escapeHtml(customer.customer_id)}</strong>
                         <span class="badge">${customer.active_jtbd_count} active JTBDs</span>
                     </div>
-                    <p class="ticket-supporting">${[...(customer.emails || []), ...(customer.phones || [])].join(" • ") || "No identifiers"}</p>
+                    <p class="task-supporting">${[...(customer.emails || []), ...(customer.phones || [])].join(" • ") || "No identifiers"}</p>
                 </div>
                 <div class="queue-stack">
                     ${instances.length ? instances.map((instance) => `
-                        <div class="ticket-card mapping-card">
+                        <div class="task-card mapping-card">
                             <div class="bubble-meta">
                                 <strong>${escapeHtml(instance.jtbd_type_name)}</strong>
                                 <span class="badge">${escapeHtml(instance.status)}</span>
                             </div>
-                            <p class="ticket-supporting">${escapeHtml(instance.public_id)} • ${escapeHtml(instance.current_stage_name)}</p>
+                            <p class="task-supporting">${escapeHtml(instance.public_id)} • ${escapeHtml(instance.current_stage_name)}</p>
                             <div class="actions-inline">
                                 <select class="jtbd-stage-select" data-customer-jtbd-id="${instance.public_id}">
                                     ${instance.stages.map((stage) => `
@@ -537,75 +564,75 @@ function renderQueueBoard() {
     }
 
     populateAgentCustomerFilter();
-    const visibleTickets = filteredAgentTickets();
+    const visibleTasks = filteredAgentTasks();
     const groups = [
-        { title: "Open tickets", className: "triage", matcher: (_queue, ticket) => !["RESOLVED", "CLOSED"].includes(ticket.status) },
-        { title: "Closed tickets", className: "closed", matcher: (_queue, ticket) => ["RESOLVED", "CLOSED"].includes(ticket.status) }
+        { title: "Open tasks", className: "triage", matcher: (_queue, task) => !["RESOLVED", "CLOSED"].includes(task.status) },
+        { title: "Closed tasks", className: "closed", matcher: (_queue, task) => ["RESOLVED", "CLOSED"].includes(task.status) }
     ];
 
     queueBoard.innerHTML = groups.map((group) => {
-        const tickets = visibleTickets.filter((ticket) => group.matcher(ticket.assigned_queue, ticket));
+        const tasks = visibleTasks.filter((task) => group.matcher(task.assigned_queue, task));
         return `
             <section class="queue-column ${group.className}">
                 <h4>${group.title}</h4>
                 <div class="queue-stack">
-                    ${tickets.length ? tickets.map(renderTicketCard).join("") : `<div class="empty-state">No tickets here.</div>`}
+                    ${tasks.length ? tasks.map(renderTaskCard).join("") : `<div class="empty-state">No tasks here.</div>`}
                 </div>
             </section>
         `;
     }).join("");
 
-    queueBoard.querySelectorAll(".ticket-card").forEach((card) => {
-        card.addEventListener("click", () => selectTicket(card.dataset.ticketId).catch(handleError));
+    queueBoard.querySelectorAll(".task-card").forEach((card) => {
+        card.addEventListener("click", () => selectTask(card.dataset.taskId).catch(handleError));
     });
 }
 
-function renderTicketCard(ticket) {
-    const active = state.selectedTicketId === ticket.ticket_id ? "active" : "";
-    const missingData = !ticket.policy_id && !ticket.claim_id;
-    const jtbdCopy = ticket.customer_jtbd_type_name ? ` • JTBD ${ticket.customer_jtbd_type_name}` : "";
+function renderTaskCard(task) {
+    const active = state.selectedTaskId === task.task_id ? "active" : "";
+    const missingData = !task.policy_id && !task.claim_id;
+    const jtbdCopy = task.customer_jtbd_type_name ? ` • JTBD ${task.customer_jtbd_type_name}` : "";
 
     return `
-        <article class="ticket-card ${active}" data-ticket-id="${ticket.ticket_id}">
+        <article class="task-card ${active}" data-task-id="${task.task_id}">
             <div class="bubble-meta">
-                <strong>${ticket.ticket_id}</strong>
+                <strong>${task.task_id}</strong>
                 <span class="status-pill ${missingData ? "warning" : "good"}">${missingData ? "missing data" : "ready"}</span>
             </div>
             <div class="bubble-meta">
-                <span class="badge">${ticket.source_channel}</span>
-                <span class="badge">${ticket.status}</span>
+                <span class="badge">${task.source_channel}</span>
+                <span class="badge">${task.status}</span>
             </div>
-            <p class="ticket-supporting">${ticket.customer_id} • ${ticket.issue_type || "unclassified"} • ${ticket.assigned_queue || "triage"}${jtbdCopy}</p>
+            <p class="task-supporting">${task.customer_id} • ${task.issue_type || "unclassified"} • ${task.assigned_queue || "triage"}${jtbdCopy}</p>
         </article>
     `;
 }
 
 function renderAgentWorkspace() {
-    const heading = el("ticketHeading");
+    const heading = el("taskHeading");
     if (!heading) {
         return;
     }
-    if (!state.currentTicket) {
+    if (!state.currentTask) {
         clearWorkspace();
         return;
     }
 
-    heading.textContent = `${state.currentTicket.ticket_id} • ${state.currentTicket.issue_type || "unclassified"}`;
-    const meta = el("ticketMeta");
+    heading.textContent = `${state.currentTask.task_id} • ${state.currentTask.issue_type || "unclassified"}`;
+    const meta = el("taskMeta");
     if (meta) {
         meta.innerHTML = [
-            badge(state.currentTicket.source_channel),
-            badge(state.currentTicket.status),
-            badge(state.currentTicket.assigned_queue || "triage"),
-            state.currentTicket.policy_id ? badge(`Policy ${state.currentTicket.policy_id}`) : "",
-            state.currentTicket.claim_id ? badge(`Claim ${state.currentTicket.claim_id}`) : ""
+            badge(state.currentTask.source_channel),
+            badge(state.currentTask.status),
+            badge(state.currentTask.assigned_queue || "triage"),
+            state.currentTask.policy_id ? badge(`Policy ${state.currentTask.policy_id}`) : "",
+            state.currentTask.claim_id ? badge(`Claim ${state.currentTask.claim_id}`) : ""
         ].join("");
     }
-    const jtbdMeta = el("ticketJtbdMeta");
+    const jtbdMeta = el("taskJtbdMeta");
     if (jtbdMeta) {
-        jtbdMeta.textContent = state.currentTicket.customer_jtbd_id
-            ? `JTBD ${state.currentTicket.customer_jtbd_type_name} • Stage ${state.currentTicket.customer_jtbd_stage_name} • ${state.currentTicket.customer_jtbd_status}`
-            : "No JTBD linked to this ticket.";
+        jtbdMeta.textContent = state.currentTask.customer_jtbd_id
+            ? `JTBD ${state.currentTask.customer_jtbd_type_name} • Stage ${state.currentTask.customer_jtbd_stage_name} • ${state.currentTask.customer_jtbd_status}`
+            : "No JTBD linked to this task.";
     }
 
     text("timelineCount", `${state.messages.length} messages`);
@@ -614,11 +641,11 @@ function renderAgentWorkspace() {
     renderDocuments();
 }
 
-function filteredAgentTickets() {
+function filteredAgentTasks() {
     if (state.view !== "agent" || state.agentCustomerFilter === "ALL") {
-        return state.tickets;
+        return state.tasks;
     }
-    return (state.tickets || []).filter((ticket) => ticket.customer_id === state.agentCustomerFilter);
+    return (state.tasks || []).filter((task) => task.customer_id === state.agentCustomerFilter);
 }
 
 function populateAgentCustomerFilter() {
@@ -626,7 +653,7 @@ function populateAgentCustomerFilter() {
     if (!select || state.view !== "agent") {
         return;
     }
-    const customers = [...new Set((state.tickets || []).map((ticket) => ticket.customer_id))].sort();
+    const customers = [...new Set((state.tasks || []).map((task) => task.customer_id))].sort();
     const current = state.agentCustomerFilter || "ALL";
     select.innerHTML = `
         <option value="ALL">All customers</option>
@@ -641,37 +668,40 @@ function renderCustomerExperience() {
     if (!customerHeading) {
         return;
     }
-    if (!state.currentTicket) {
-        customerHeading.textContent = "Your tickets";
-        text("customerAppSubhead", "Click any ticket below to expand its full conversation and continue the thread.");
+    if (!state.currentRequest) {
+        customerHeading.textContent = "Your requests";
+        text("customerAppSubhead", "Click any request below to expand its full conversation and continue the journey.");
         text("customerStatusPill", "Ready");
         return;
     }
 
-    customerHeading.textContent = `${state.currentTicket.ticket_id} selected`;
-    text("customerAppSubhead", "The expanded ticket shows the same support conversation, including ticket emails and agent replies.");
-    text("customerStatusPill", state.currentTicket.status);
+    customerHeading.textContent = state.currentRequest.title || "Selected request";
+    text(
+        "customerAppSubhead",
+        "The expanded request shows the full customer journey, including email, WhatsApp, app updates, and documents."
+    );
+    text("customerStatusPill", state.currentRequest.status_label || "Active");
     setStartSupportCollapsed(true);
 }
 
-function renderCustomerTicketList() {
-    const container = el("customerTicketList");
+function renderCustomerTaskList() {
+    const container = el("customerTaskList");
     if (!container) {
         return;
     }
-    const tickets = state.customerTickets || [];
-    text("customerTicketCount", `${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`);
-    if (!tickets.length) {
+    const requests = state.customerRequests || [];
+    text("customerTaskCount", `${requests.length} request${requests.length === 1 ? "" : "s"}`);
+    if (!requests.length) {
         container.className = "queue-stack empty-state";
-        container.textContent = "No tickets yet.";
+        container.textContent = "No requests yet.";
         return;
     }
     container.className = "queue-stack";
-    container.innerHTML = tickets.map(renderCustomerTicketAccordion).join("");
-    container.querySelectorAll(".customer-ticket-header").forEach((card) => {
-        card.addEventListener("click", () => toggleCustomerTicket(card.dataset.ticketId).catch(handleError));
+    container.innerHTML = requests.map(renderCustomerTaskAccordion).join("");
+    container.querySelectorAll(".customer-task-header").forEach((card) => {
+        card.addEventListener("click", () => toggleCustomerTask(card.dataset.requestId).catch(handleError));
     });
-    hydrateExpandedCustomerTicket(container);
+    hydrateExpandedCustomerTask(container);
 }
 
 function renderChatThread(containerId, messages, customerView) {
@@ -686,8 +716,8 @@ function renderChatThreadInElement(container, messages, customerView) {
     if (!messages.length) {
         container.className = `chat-thread ${customerView ? "customer-view" : "agent-view"} empty-state`;
         container.textContent = customerView
-            ? "No support ticket loaded in the app yet."
-            : "Select a ticket to load the full conversation.";
+            ? "No request loaded in the app yet."
+            : "Select a task to load the full conversation.";
         return;
     }
 
@@ -696,46 +726,45 @@ function renderChatThreadInElement(container, messages, customerView) {
     messages.forEach((message) => container.appendChild(buildMessageNode(message, customerView)));
 }
 
-function renderCustomerTicketAccordion(ticket) {
-    const active = state.selectedTicketId === ticket.ticket_id;
-    const missingData = !ticket.policy_id && !ticket.claim_id;
-    const statusTone = missingData ? "warning" : "good";
+function renderCustomerTaskAccordion(request) {
+    const active = state.selectedRequestId === request.request_id;
+    const statusTone = request.status_label === "Completed" ? "good" : "warning";
     return `
-        <article class="ticket-card customer-ticket-card ${active ? "active expanded" : ""}" data-ticket-id="${ticket.ticket_id}">
-            <button type="button" class="customer-ticket-header" data-ticket-id="${ticket.ticket_id}">
-                <div class="customer-ticket-summary">
+        <article class="task-card customer-task-card ${active ? "active expanded" : ""}" data-request-id="${request.request_id}">
+            <button type="button" class="customer-task-header" data-request-id="${request.request_id}">
+                <div class="customer-task-summary">
                     <div class="bubble-meta">
-                        <strong>${ticket.ticket_id}</strong>
-                        <span class="status-pill ${statusTone}">${missingData ? "missing data" : "ready"}</span>
+                        <strong>${escapeHtml(request.title || "Request")}</strong>
+                        <span class="status-pill ${statusTone}">${escapeHtml(request.status_label || "Active")}</span>
                     </div>
                     <div class="bubble-meta">
-                        <span class="badge">${ticket.source_channel}</span>
-                        <span class="badge">${ticket.status}</span>
-                        <span class="badge">${ticket.assigned_queue || "triage"}</span>
+                        <span class="badge">${escapeHtml(request.stage_label || "Open")}</span>
+                        <span class="badge">${request.source_channel}</span>
+                        ${request.jtbd_backed ? `<span class="badge">JTBD</span>` : `<span class="badge">Request</span>`}
                     </div>
-                    <p class="ticket-supporting">${ticket.issue_type || "unclassified"} • ${ticket.customer_id}</p>
+                    <p class="task-supporting">${request.jtbd_type_name || "General support request"} • ${request.internal_task_count} internal work item${request.internal_task_count === 1 ? "" : "s"}</p>
                 </div>
-                <span class="customer-ticket-chevron">${active ? "Hide" : "Open"}</span>
+                <span class="customer-task-chevron">${active ? "Hide" : "Open"}</span>
             </button>
             ${active ? `
-                <div class="customer-ticket-body" data-ticket-body="${ticket.ticket_id}">
-                    <div class="customer-ticket-details">
-                        <span class="badge">Customer ${ticket.customer_id}</span>
-                        ${ticket.policy_id ? `<span class="badge">Policy ${escapeHtml(ticket.policy_id)}</span>` : ""}
-                        ${ticket.claim_id ? `<span class="badge">Claim ${escapeHtml(ticket.claim_id)}</span>` : ""}
+                <div class="customer-task-body" data-task-body="${request.request_id}">
+                    <div class="customer-task-details">
+                        <span class="badge">Request stage ${escapeHtml(request.stage_label || "Open")}</span>
+                        <span class="badge">Status ${escapeHtml(request.status_label || "Active")}</span>
+                        ${request.jtbd_type_name ? `<span class="badge">${escapeHtml(request.jtbd_type_name)}</span>` : ""}
                     </div>
-                    <div class="chat-thread customer-ticket-chat empty-state">Loading conversation...</div>
+                    <div class="chat-thread customer-task-chat empty-state">Loading conversation...</div>
                     <form id="customerComposeForm" class="stack-form compact customer-compose-form">
                         <label>
                             Message
-                            <textarea name="body" rows="4" required>I want to continue on this same support ticket.</textarea>
+                            <textarea name="body" rows="4" required>I want to continue on this same request.</textarea>
                         </label>
                         <label>
                             Attach documents
                             <input name="attachments" type="file" multiple>
                         </label>
-                        <p class="small-note">For email responses, reply directly to the ticket email in your inbox.</p>
-                        <button type="submit">Send update to this ticket</button>
+                        <p class="small-note">For email responses, reply directly from your inbox and we will keep everything on this same request.</p>
+                        <button type="submit">Send update to this request</button>
                     </form>
                 </div>
             ` : ""}
@@ -743,15 +772,15 @@ function renderCustomerTicketAccordion(ticket) {
     `;
 }
 
-function hydrateExpandedCustomerTicket(container) {
-    if (!container || !state.currentTicket || state.selectedTicketId !== state.currentTicket.ticket_id) {
+function hydrateExpandedCustomerTask(container) {
+    if (!container || !state.currentRequest || state.selectedRequestId !== state.currentRequest.request_id) {
         return;
     }
-    const body = container.querySelector(`[data-ticket-body="${state.currentTicket.ticket_id}"]`);
+    const body = container.querySelector(`[data-task-body="${state.currentRequest.request_id}"]`);
     if (!body) {
         return;
     }
-    const chatContainer = body.querySelector(".customer-ticket-chat");
+    const chatContainer = body.querySelector(".customer-task-chat");
     renderChatThreadInElement(chatContainer, state.messages, true);
     bindDynamicCustomerComposeForm(body.querySelector("#customerComposeForm"));
 }
@@ -802,17 +831,27 @@ function renderDocuments() {
     });
 }
 
-function syncFormsWithTicket() {
-    if (!state.currentTicket) {
+function syncFormsWithTask() {
+    if (!state.currentTask) {
         return;
     }
-    setFormValue("#patchForm [name='status']", state.currentTicket.status || "");
+    setFormValue("#patchForm [name='status']", state.currentTask.status || "");
 }
 
 function clearWorkspace() {
-    text("ticketHeading", "Select a ticket");
-    html("ticketMeta", "");
-    text("ticketJtbdMeta", "");
+    if (state.view === "customer") {
+        state.currentRequest = null;
+        state.messages = [];
+        state.documents = [];
+        persistRequestId(null);
+        renderCustomerExperience();
+        renderCustomerTaskList();
+        setStartSupportCollapsed(false);
+        return;
+    }
+    text("taskHeading", "Select a task");
+    html("taskMeta", "");
+    text("taskJtbdMeta", "");
     renderChatThread("messageTimeline", [], false);
     renderChatThread("customerChat", [], true);
     const documentList = el("documentList");
@@ -820,12 +859,12 @@ function clearWorkspace() {
         documentList.className = "document-list empty-state";
         documentList.textContent = "Documents shared from any channel appear here.";
     }
-    state.currentTicket = null;
+    state.currentTask = null;
     state.messages = [];
     state.documents = [];
-    persistTicketId(null);
+    persistTaskId(null);
     renderCustomerExperience();
-    renderCustomerTicketList();
+    renderCustomerTaskList();
     setStartSupportCollapsed(false);
 }
 
@@ -844,7 +883,7 @@ function setStartSupportCollapsed(collapsed) {
         return;
     }
     body.classList.toggle("collapsed", collapsed);
-    button.textContent = collapsed ? "Open new ticket" : "Hide new ticket form";
+    button.textContent = collapsed ? "Open new request" : "Hide new request form";
 }
 
 function pushEvent(title, copy) {
@@ -1042,14 +1081,16 @@ function populateJtbdSelects() {
     }
 }
 
-function ensureTicketSelected() {
-    if (!state.selectedTicketId) {
-        throw new Error("Select a ticket first.");
+function ensureTaskSelected() {
+    if (!state.selectedTaskId) {
+        throw new Error("Select a task first.");
     }
 }
 
 async function submitCustomerComposeForm(event) {
-    ensureTicketSelected();
+    if (!state.selectedRequestId) {
+        throw new Error("Select a request first.");
+    }
     const data = new FormData(event.currentTarget);
     const body = data.get("body");
     const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
@@ -1057,7 +1098,7 @@ async function submitCustomerComposeForm(event) {
     if (uploadedFiles.length) {
         for (let index = 0; index < uploadedFiles.length; index += 1) {
             const file = uploadedFiles[index];
-            await api(`/v1/tickets/${state.selectedTicketId}/documents`, {
+            await api(`/v1/customers/me/requests/${encodeURIComponent(state.selectedRequestId)}/documents`, {
                 method: "POST",
                 body: pruneEmpty({
                     channel: "UI",
@@ -1076,7 +1117,7 @@ async function submitCustomerComposeForm(event) {
             });
         }
     } else {
-        await api(`/v1/tickets/${state.selectedTicketId}/messages`, {
+        await api(`/v1/customers/me/requests/${encodeURIComponent(state.selectedRequestId)}/messages`, {
             method: "POST",
             body: {
                 channel: "UI",
@@ -1089,8 +1130,8 @@ async function submitCustomerComposeForm(event) {
         });
     }
 
-    pushEvent("Customer continued existing ticket", `A new customer update was added to ${state.selectedTicketId}.`);
-    await refreshBoard(state.selectedTicketId);
+    pushEvent("Customer continued an existing request", "A new customer update was added to the same request journey.");
+    await refreshBoard(state.selectedRequestId);
 }
 
 function bindDynamicCustomerComposeForm(form) {
@@ -1112,16 +1153,30 @@ function handleError(error) {
     pushEvent("Action failed", error.message || "Something went wrong.");
 }
 
-function syncTicketUrl(ticketId) {
+function syncTaskUrl(taskId) {
     if (state.view !== "customer" || !window.history || !window.location) {
         return;
     }
     const url = new URL(window.location.href);
-    if (ticketId) {
-        url.searchParams.set("ticket", ticketId);
+    if (taskId) {
+        url.searchParams.set("task", taskId);
     } else {
-        url.searchParams.delete("ticket");
+        url.searchParams.delete("task");
     }
+    window.history.replaceState({}, "", url);
+}
+
+function syncRequestUrl(requestId) {
+    if (state.view !== "customer" || !window.history || !window.location) {
+        return;
+    }
+    const url = new URL(window.location.href);
+    if (requestId) {
+        url.searchParams.set("request", requestId);
+    } else {
+        url.searchParams.delete("request");
+    }
+    url.searchParams.delete("task");
     window.history.replaceState({}, "", url);
 }
 
@@ -1130,22 +1185,32 @@ async function loadSession() {
     state.user = response.data;
 }
 
-function persistTicketId(ticketId) {
-    state.selectedTicketId = ticketId;
-    if (ticketId) {
-        localStorage.setItem(STORAGE_KEYS.ticketId, ticketId);
+function persistTaskId(taskId) {
+    state.selectedTaskId = taskId;
+    if (taskId) {
+        localStorage.setItem(STORAGE_KEYS.taskId, taskId);
     } else {
-        localStorage.removeItem(STORAGE_KEYS.ticketId);
+        localStorage.removeItem(STORAGE_KEYS.taskId);
     }
-    syncTicketUrl(ticketId);
+    syncTaskUrl(taskId);
 }
 
-async function toggleCustomerTicket(ticketId) {
-    if (state.view === "customer" && state.selectedTicketId === ticketId) {
+function persistRequestId(requestId) {
+    state.selectedRequestId = requestId;
+    if (requestId) {
+        localStorage.setItem(STORAGE_KEYS.requestId, requestId);
+    } else {
+        localStorage.removeItem(STORAGE_KEYS.requestId);
+    }
+    syncRequestUrl(requestId);
+}
+
+async function toggleCustomerTask(taskId) {
+    if (state.view === "customer" && state.selectedRequestId === taskId) {
         clearWorkspace();
         return;
     }
-    await selectTicket(ticketId);
+    await selectCustomerRequest(taskId);
 }
 
 function syncUserIdentity() {
@@ -1275,6 +1340,19 @@ function guessMimeType(url) {
 
 function driveFileIdFromToken(token) {
     return `${token || ""}`.startsWith("drive://") ? token.slice("drive://".length) : null;
+}
+
+function normalizeCustomerRequestId(value) {
+    if (!value) {
+        return null;
+    }
+    if (value.startsWith("jtbd_") || value.startsWith("task_")) {
+        return value;
+    }
+    if (value.startsWith("TSK-")) {
+        return `task_${value}`;
+    }
+    return value;
 }
 
 function encodeDriveAttachmentToken(file) {

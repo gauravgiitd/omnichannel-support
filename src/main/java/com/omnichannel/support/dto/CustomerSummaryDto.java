@@ -9,5 +9,5 @@ public record CustomerSummaryDto(
         String customerId,
         List<String> emails,
         List<String> phones,
-        long ticketCount,
+        long taskCount,
         long activeJtbdCount) {}

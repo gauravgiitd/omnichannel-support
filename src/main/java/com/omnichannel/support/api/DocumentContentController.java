@@ -2,8 +2,8 @@ package com.omnichannel.support.api;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.omnichannel.support.domain.TicketDocument;
-import com.omnichannel.support.security.TicketAccessService;
+import com.omnichannel.support.domain.TaskDocument;
+import com.omnichannel.support.security.TaskAccessService;
 import com.omnichannel.support.service.DocumentService;
 import com.omnichannel.support.service.GoogleDriveStorageService;
 import java.nio.charset.StandardCharsets;
@@ -25,15 +25,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class DocumentContentController {
 
     private final DocumentService documentService;
-    private final TicketAccessService ticketAccessService;
+    private final TaskAccessService taskAccessService;
     private final GoogleDriveStorageService googleDriveStorageService;
     private final ObjectMapper objectMapper;
 
     @GetMapping("/{documentId}/content")
     public ResponseEntity<byte[]> content(
             @PathVariable("documentId") String documentId, Authentication authentication) throws Exception {
-        TicketDocument document = documentService.getByPublicId(documentId);
-        ticketAccessService.assertCanAccessTicket(authentication, document.getTicket().getTicketNumber());
+        TaskDocument document = documentService.getByPublicId(documentId);
+        taskAccessService.assertCanAccessTask(authentication, document.getTask().getTaskNumber());
 
         Map<String, Object> metadata = parseMetadata(document.getMetadataJson());
         String driveFileId = stringValue(metadata.get("drive_file_id"));

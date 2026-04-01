@@ -13,7 +13,7 @@
             <p class="eyebrow">Agent Experience</p>
             <p class="hero-copy">
                 The agent workspace shows routed queues, full chat history, and one shared document layer. Customer
-                email, WhatsApp, and in-app messages all appear in the same ticket thread.
+                email, WhatsApp, and in-app messages all appear in the same task thread.
             </p>
         </div>
         <div class="hero-actions">
@@ -27,7 +27,7 @@
         <div class="surface-head">
             <div>
                 <p class="eyebrow">Agent UI</p>
-                <h2>Queue board and ticket chat</h2>
+                <h2>Queue board and task chat</h2>
             </div>
             <span class="small-note" id="agentIdentity">Signed in with Google</span>
         </div>
@@ -56,11 +56,11 @@
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Agent Workspace</p>
-                        <h3 id="ticketHeading">Select a ticket</h3>
+                        <h3 id="taskHeading">Select a task</h3>
                     </div>
-                    <div id="ticketMeta" class="ticket-meta"></div>
+                    <div id="taskMeta" class="task-meta"></div>
                 </div>
-                <div id="ticketJtbdMeta" class="ticket-jtbd-strip small-note"></div>
+                <div id="taskJtbdMeta" class="task-jtbd-strip small-note"></div>
 
                 <div class="agent-workspace">
                     <div class="workspace-column">
@@ -69,7 +69,7 @@
                                 <h4>Conversation chat</h4>
                                 <span id="timelineCount" class="small-note">0 messages</span>
                             </div>
-                            <div id="messageTimeline" class="chat-thread empty-state">Select a ticket to load the full conversation.</div>
+                            <div id="messageTimeline" class="chat-thread empty-state">Select a task to load the full conversation.</div>
                         </div>
 
                         <div class="subpanel">
@@ -87,10 +87,10 @@
                                 <h4>Reply as agent</h4>
                             </div>
                             <form id="replyForm" class="stack-form compact">
-                                <p class="small-note">Replies are added to the shared ticket thread from your logged-in agent account.</p>
+                                <p class="small-note">Replies are added to the shared task thread from your logged-in agent account.</p>
                                 <label>
                                     Message
-                                    <textarea name="body" rows="4" required>I can see your email and WhatsApp documents on the same ticket. The policy servicing team is handling this now.</textarea>
+                                    <textarea name="body" rows="4" required>I can see your email and WhatsApp documents on the same task. The policy servicing team is handling this now.</textarea>
                                 </label>
                                 <label>
                                     Attach documents
@@ -102,10 +102,10 @@
 
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Ticket status</h4>
+                                <h4>Task status</h4>
                             </div>
                             <form id="patchForm" class="stack-form compact">
-                                <p class="small-note">Use this only when the ticket is ready to be closed.</p>
+                                <p class="small-note">Use this only when the task is ready to be closed.</p>
                                 <label>
                                     Status
                                     <select name="status">
@@ -113,7 +113,7 @@
                                         <option value="CLOSED">CLOSED</option>
                                     </select>
                                 </label>
-                                <button type="submit">Update ticket</button>
+                                <button type="submit">Update task</button>
                             </form>
                         </div>
                     </div>

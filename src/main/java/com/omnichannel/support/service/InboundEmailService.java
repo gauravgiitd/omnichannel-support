@@ -5,17 +5,17 @@ import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.PendingSelectionType;
 import com.omnichannel.support.domain.SenderType;
-import com.omnichannel.support.domain.Ticket;
-import com.omnichannel.support.domain.TicketPriority;
-import com.omnichannel.support.dto.CreateTicketRequest;
+import com.omnichannel.support.domain.Task;
+import com.omnichannel.support.domain.TaskPriority;
+import com.omnichannel.support.dto.CreateTaskRequest;
 import com.omnichannel.support.dto.DocumentDto;
 import com.omnichannel.support.dto.InboundEmailAttachment;
 import com.omnichannel.support.dto.InboundEmailRequest;
 import com.omnichannel.support.dto.MessageDto;
-import com.omnichannel.support.dto.TicketDto;
+import com.omnichannel.support.dto.TaskDto;
 import com.omnichannel.support.error.ValidationException;
 import com.omnichannel.support.repo.MessageRepository;
-import com.omnichannel.support.repo.TicketRepository;
+import com.omnichannel.support.repo.TaskRepository;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -33,16 +33,16 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class InboundEmailService {
 
-    private static final Pattern SUBJECT_TICKET = Pattern.compile("(?i)\\b(TKT-[A-Z0-9-]+)\\b");
+    private static final Pattern SUBJECT_TICKET = Pattern.compile("(?i)\\b(TSK-[A-Z0-9-]+)\\b");
     private static final int MAX_SELECTION_OPTIONS = 5;
 
     private final IdentityResolutionService identityResolutionService;
     private final CustomerContactMappingService customerContactMappingService;
-    private final TicketRepository ticketRepository;
+    private final TaskRepository taskRepository;
     private final MessageRepository messageRepository;
-    private final TicketResolutionService ticketResolutionService;
+    private final TaskResolutionService taskResolutionService;
     private final ConversationService conversationService;
-    private final TicketService ticketService;
+    private final TaskService taskService;
     private final DocumentService documentService;
     private final JtbdService jtbdService;
     private final CustomerConversationContextService customerConversationContextService;
@@ -54,22 +54,22 @@ public class InboundEmailService {
         String customerId = resolveCustomerId(request);
         identityResolutionService.registerLink(customerId, IdentifierType.EMAIL, request.fromAddress());
         registerPolicyClaimHints(customerId, request);
-        List<Ticket> openTickets = ticketService.findOpenTicketsForCustomer(customerId).stream()
-                .map(ticketResolutionService::resolveCanonical)
+        List<Task> openTasks = taskService.findOpenTasksForCustomer(customerId).stream()
+                .map(taskResolutionService::resolveCanonical)
                 .distinct()
                 .toList();
         List<CustomerJtbd> activeJtbds = jtbdService.activeJtbdsForCustomer(customerId);
 
-        if (Boolean.TRUE.equals(request.forceNewTicket())) {
-            return createNewTicket(request, customerId, null);
+        if (Boolean.TRUE.equals(request.forceNewTask())) {
+            return createNewTask(request, customerId, null);
         }
 
-        Optional<Ticket> explicitThread = resolveThreadTicket(request);
+        Optional<Task> explicitThread = resolveThreadTask(request);
         if (explicitThread.isPresent()) {
-            Ticket ticket = ticketResolutionService.resolveCanonical(explicitThread.get());
-            assertCustomerOwns(customerId, ticket);
-            customerConversationContextService.setActiveTicket(customerId, ChannelType.EMAIL, ticket.getTicketNumber());
-            return appendToTicket(ticket, customerId, request);
+            Task task = taskResolutionService.resolveCanonical(explicitThread.get());
+            assertCustomerOwns(customerId, task);
+            customerConversationContextService.setActiveTask(customerId, ChannelType.EMAIL, task.getTaskNumber());
+            return appendToTask(task, customerId, request);
         }
 
         Optional<CustomerConversationContextService.SelectionMatch> selectionMatch =
@@ -77,16 +77,16 @@ public class InboundEmailService {
         if (selectionMatch.isPresent()) {
             customerConversationContextService.clearPendingSelection(customerId, ChannelType.EMAIL);
             if (selectionMatch.get().type() == PendingSelectionType.TICKET) {
-                Ticket ticket = ticketService.loadCanonicalTicket(selectionMatch.get().option().reference());
-                assertCustomerOwns(customerId, ticket);
-                customerConversationContextService.setActiveTicket(customerId, ChannelType.EMAIL, ticket.getTicketNumber());
-                return appendToTicket(ticket, customerId, request);
+                Task task = taskService.loadCanonicalTask(selectionMatch.get().option().reference());
+                assertCustomerOwns(customerId, task);
+                customerConversationContextService.setActiveTask(customerId, ChannelType.EMAIL, task.getTaskNumber());
+                return appendToTask(task, customerId, request);
             }
             CustomerJtbd jtbd = jtbdService.loadCustomerJtbd(selectionMatch.get().option().reference());
             if (!jtbd.getCustomerId().equals(customerId)) {
                 throw new ValidationException("JTBD does not belong to resolved customer");
             }
-            return createNewTicket(request, customerId, jtbd);
+            return createNewTask(request, customerId, jtbd);
         }
 
         Optional<CustomerConversationContextService.PendingSelection> pendingSelection =
@@ -99,17 +99,17 @@ public class InboundEmailService {
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        if (isSwitchToTicketRequest(request.bodyText()) && openTickets.size() > 1) {
-            List<CustomerConversationContextService.SelectionOption> options = buildTicketSelectionOptions(openTickets);
+        if (isSwitchToTaskRequest(request.bodyText()) && openTasks.size() > 1) {
+            List<CustomerConversationContextService.SelectionOption> options = buildTaskSelectionOptions(openTasks);
             customerConversationContextService.setPendingSelection(
                     customerId, ChannelType.EMAIL, PendingSelectionType.TICKET, options);
-            sendSelectionPrompt(request, "Which ticket would you like to discuss?", buildPromptBody(PendingSelectionType.TICKET, options));
+            sendSelectionPrompt(request, "Which request would you like to discuss?", buildPromptBody(PendingSelectionType.TICKET, options));
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
         if (isSwitchToJtbdRequest(request.bodyText()) && !activeJtbds.isEmpty()) {
             if (activeJtbds.size() == 1) {
-                return createNewTicket(request, customerId, activeJtbds.get(0));
+                return createNewTask(request, customerId, activeJtbds.get(0));
             }
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
@@ -118,30 +118,30 @@ public class InboundEmailService {
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        Optional<Ticket> activeTicket = activeContextTicket(customerId);
-        if (activeTicket.isPresent()) {
-            return appendToTicket(activeTicket.get(), customerId, request);
+        Optional<Task> activeTask = activeContextTask(customerId);
+        if (activeTask.isPresent()) {
+            return appendToTask(activeTask.get(), customerId, request);
         }
 
-        if (!openTickets.isEmpty()) {
-            if (openTickets.size() == 1) {
-                Ticket ticket = openTickets.get(0);
-                customerConversationContextService.setActiveTicket(customerId, ChannelType.EMAIL, ticket.getTicketNumber());
-                return appendToTicket(ticket, customerId, request);
+        if (!openTasks.isEmpty()) {
+            if (openTasks.size() == 1) {
+                Task task = openTasks.get(0);
+                customerConversationContextService.setActiveTask(customerId, ChannelType.EMAIL, task.getTaskNumber());
+                return appendToTask(task, customerId, request);
             }
-            List<CustomerConversationContextService.SelectionOption> options = buildTicketSelectionOptions(openTickets);
+            List<CustomerConversationContextService.SelectionOption> options = buildTaskSelectionOptions(openTasks);
             customerConversationContextService.setPendingSelection(
                     customerId, ChannelType.EMAIL, PendingSelectionType.TICKET, options);
             sendSelectionPrompt(
                     request,
-                    "Which ticket would you like to discuss?",
+                    "Which request would you like to discuss?",
                     buildPromptBody(PendingSelectionType.TICKET, options));
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
         if (!activeJtbds.isEmpty()) {
             if (activeJtbds.size() == 1) {
-                return createNewTicket(request, customerId, activeJtbds.get(0));
+                return createNewTask(request, customerId, activeJtbds.get(0));
             }
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
@@ -153,19 +153,19 @@ public class InboundEmailService {
             return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
         }
 
-        return createNewTicket(request, customerId, null);
+        return createNewTask(request, customerId, null);
     }
 
-    private Optional<Ticket> activeContextTicket(String customerId) {
-        return customerConversationContextService.activeTicketNumber(customerId, ChannelType.EMAIL)
-                .flatMap(ticketRepository::findByTicketNumber)
-                .map(ticketResolutionService::resolveCanonical)
-                .filter(ticket -> ticket.getCustomerId().equals(customerId))
-                .filter(ticket -> ticketService.findOpenTicketsForCustomer(customerId).stream()
-                        .anyMatch(open -> open.getTicketNumber().equals(ticket.getTicketNumber())));
+    private Optional<Task> activeContextTask(String customerId) {
+        return customerConversationContextService.activeTaskNumber(customerId, ChannelType.EMAIL)
+                .flatMap(taskRepository::findByTaskNumber)
+                .map(taskResolutionService::resolveCanonical)
+                .filter(task -> task.getCustomerId().equals(customerId))
+                .filter(task -> taskService.findOpenTasksForCustomer(customerId).stream()
+                        .anyMatch(open -> open.getTaskNumber().equals(task.getTaskNumber())));
     }
 
-    private InboundEmailResult appendToTicket(Ticket canonical, String customerId, InboundEmailRequest request) {
+    private InboundEmailResult appendToTask(Task canonical, String customerId, InboundEmailRequest request) {
         List<DocumentDto> documents = registerEmailAttachments(canonical, customerId, request);
         List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
         List<String> fileUrls = documents.stream().map(DocumentDto::fileUrl).toList();
@@ -183,57 +183,57 @@ public class InboundEmailService {
                         fileUrls,
                         normalizeMessageId(request.messageId()),
                         metadata);
-        customerConversationContextService.setActiveTicket(customerId, ChannelType.EMAIL, canonical.getTicketNumber());
+        customerConversationContextService.setActiveTask(customerId, ChannelType.EMAIL, canonical.getTaskNumber());
         auditService.record(
                 "INBOUND_EMAIL_APPENDED",
-                "Ticket",
-                canonical.getTicketNumber(),
+                "Task",
+                canonical.getTaskNumber(),
                 "SYSTEM",
                 "email-adapter",
                 Map.of("message_id", message.messageId()));
-        return new InboundEmailResult(canonical.getTicketNumber(), message.messageId(), InboundOutcome.APPENDED);
+        return new InboundEmailResult(canonical.getTaskNumber(), message.messageId(), InboundOutcome.APPENDED);
     }
 
-    private InboundEmailResult createNewTicket(InboundEmailRequest request, String customerId, CustomerJtbd customerJtbd) {
+    private InboundEmailResult createNewTask(InboundEmailRequest request, String customerId, CustomerJtbd customerJtbd) {
         Map<String, Object> metadata = buildEmailMetadata(request);
         if (customerJtbd != null) {
             metadata.put("customer_jtbd_id", customerJtbd.getPublicId());
             metadata.put("jtbd_type", customerJtbd.getJtbdType().getName());
         }
-        CreateTicketRequest create =
-                new CreateTicketRequest(
+        CreateTaskRequest create =
+                new CreateTaskRequest(
                         customerId,
                         IssueTypeParser.fromEmail(request.subject(), request.bodyText()),
                         blankToNull(request.lobHint()),
                         blankToNull(request.claimIdHint()),
                         blankToNull(request.policyIdHint()),
-                        TicketPriority.MEDIUM,
+                        TaskPriority.MEDIUM,
                         ChannelType.EMAIL,
                         request.bodyText(),
                         request.fromAddress(),
                         metadata,
                         normalizeMessageId(request.messageId()));
-        TicketDto ticketDto = ticketService.createTicket(create, customerJtbd);
-        Ticket ticket =
-                ticketRepository
-                        .findByTicketNumber(ticketDto.ticketId())
-                        .map(ticketResolutionService::resolveCanonical)
-                        .orElseThrow(() -> new ValidationException("ticket not found after create"));
+        TaskDto taskDto = taskService.createTask(create, customerJtbd);
+        Task task =
+                taskRepository
+                        .findByTaskNumber(taskDto.taskId())
+                        .map(taskResolutionService::resolveCanonical)
+                        .orElseThrow(() -> new ValidationException("task not found after create"));
 
-        List<DocumentDto> documents = registerEmailAttachments(ticket, customerId, request);
+        List<DocumentDto> documents = registerEmailAttachments(task, customerId, request);
         List<String> docIds = documents.stream().map(DocumentDto::documentId).toList();
         List<String> fileUrls = documents.stream().map(DocumentDto::fileUrl).toList();
-        conversationService.enrichLatestMessageWithInboundFiles(ticket, fileUrls, docIds);
-        customerConversationContextService.setActiveTicket(customerId, ChannelType.EMAIL, ticket.getTicketNumber());
+        conversationService.enrichLatestMessageWithInboundFiles(task, fileUrls, docIds);
+        customerConversationContextService.setActiveTask(customerId, ChannelType.EMAIL, task.getTaskNumber());
 
         auditService.record(
                 "INBOUND_EMAIL_NEW_TICKET",
-                "Ticket",
-                ticketDto.ticketId(),
+                "Task",
+                taskDto.taskId(),
                 "SYSTEM",
                 "email-adapter",
                 customerJtbd != null ? Map.of("customer_jtbd_id", customerJtbd.getPublicId()) : Map.of());
-        return new InboundEmailResult(ticketDto.ticketId(), null, InboundOutcome.CREATED);
+        return new InboundEmailResult(taskDto.taskId(), null, InboundOutcome.CREATED);
     }
 
     private void registerPolicyClaimHints(String customerId, InboundEmailRequest request) {
@@ -248,7 +248,7 @@ public class InboundEmailService {
     }
 
     private List<DocumentDto> registerEmailAttachments(
-            Ticket canonical, String customerId, InboundEmailRequest request) {
+            Task canonical, String customerId, InboundEmailRequest request) {
         if (request.attachments() == null || request.attachments().isEmpty()) {
             return List.of();
         }
@@ -284,9 +284,9 @@ public class InboundEmailService {
         return documents;
     }
 
-    private static void assertCustomerOwns(String customerId, Ticket ticket) {
-        if (!ticket.getCustomerId().equals(customerId)) {
-            throw new ValidationException("ticket does not belong to resolved customer");
+    private static void assertCustomerOwns(String customerId, Task task) {
+        if (!task.getCustomerId().equals(customerId)) {
+            throw new ValidationException("task does not belong to resolved customer");
         }
     }
 
@@ -314,33 +314,33 @@ public class InboundEmailService {
         return newId;
     }
 
-    private Optional<Ticket> resolveThreadTicket(InboundEmailRequest request) {
+    private Optional<Task> resolveThreadTask(InboundEmailRequest request) {
         if (request.inReplyTo() != null && !request.inReplyTo().isBlank()) {
-            Optional<Ticket> byReply = findTicketByMessageRef(normalizeMessageId(request.inReplyTo()));
+            Optional<Task> byReply = findTaskByMessageRef(normalizeMessageId(request.inReplyTo()));
             if (byReply.isPresent()) {
                 return byReply;
             }
         }
         if (request.references() != null) {
             for (String reference : request.references()) {
-                Optional<Ticket> ticket = findTicketByMessageRef(normalizeMessageId(reference));
-                if (ticket.isPresent()) {
-                    return ticket;
+                Optional<Task> task = findTaskByMessageRef(normalizeMessageId(reference));
+                if (task.isPresent()) {
+                    return task;
                 }
             }
         }
         if (request.subject() != null) {
             Matcher matcher = SUBJECT_TICKET.matcher(request.subject());
             if (matcher.find()) {
-                String ticketNumber = matcher.group(1).toUpperCase(Locale.ROOT);
-                return ticketRepository.findByTicketNumber(ticketNumber);
+                String taskNumber = matcher.group(1).toUpperCase(Locale.ROOT);
+                return taskRepository.findByTaskNumber(taskNumber);
             }
         }
         if (request.bodyText() != null) {
             Matcher matcher = SUBJECT_TICKET.matcher(request.bodyText());
             if (matcher.find()) {
-                String ticketNumber = matcher.group(1).toUpperCase(Locale.ROOT);
-                return ticketRepository.findByTicketNumber(ticketNumber);
+                String taskNumber = matcher.group(1).toUpperCase(Locale.ROOT);
+                return taskRepository.findByTaskNumber(taskNumber);
             }
         }
         return Optional.empty();
@@ -366,7 +366,7 @@ public class InboundEmailService {
         return "Re: " + trimmed;
     }
 
-    private static boolean isSwitchToTicketRequest(String body) {
+    private static boolean isSwitchToTaskRequest(String body) {
         if (body == null || body.isBlank()) {
             return false;
         }
@@ -390,14 +390,17 @@ public class InboundEmailService {
                 || normalized.contains("CHANGE JTBD");
     }
 
-    private static List<CustomerConversationContextService.SelectionOption> buildTicketSelectionOptions(List<Ticket> openTickets) {
+    private static List<CustomerConversationContextService.SelectionOption> buildTaskSelectionOptions(List<Task> openTasks) {
         List<CustomerConversationContextService.SelectionOption> options = new ArrayList<>();
-        for (int i = 0; i < Math.min(openTickets.size(), MAX_SELECTION_OPTIONS); i++) {
-            Ticket ticket = openTickets.get(i);
+        for (int i = 0; i < Math.min(openTasks.size(), MAX_SELECTION_OPTIONS); i++) {
+            Task task = openTasks.get(i);
+            String label = task.getCustomerJtbd() != null
+                    ? task.getCustomerJtbd().getJtbdType().getName() + " - " + task.getCustomerJtbd().getCurrentStage().getStageName()
+                    : humanize(task.getIssueType()) + " - " + humanize(task.getStatus().name());
             options.add(new CustomerConversationContextService.SelectionOption(
                     i + 1,
-                    ticket.getTicketNumber(),
-                    ticket.getTicketNumber() + " - " + ticket.getIssueType() + " (" + ticket.getStatus() + ")"));
+                    task.getTaskNumber(),
+                    label));
         }
         return options;
     }
@@ -416,28 +419,34 @@ public class InboundEmailService {
 
     private static String buildPromptBody(
             PendingSelectionType type, List<CustomerConversationContextService.SelectionOption> options) {
-        String topic = type == PendingSelectionType.TICKET ? "ticket" : "job";
+        String topic = type == PendingSelectionType.TICKET ? "request" : "job";
         StringBuilder builder = new StringBuilder("We found multiple ").append(topic)
-                .append(" options for your account. Reply with the number or reference for the one you mean:\n");
+                .append(" options for your account. Reply with the number for the one you mean:\n");
         for (CustomerConversationContextService.SelectionOption option : options) {
             builder.append(option.optionNumber())
                     .append(". ")
                     .append(option.label())
-                    .append(" [")
-                    .append(option.reference())
-                    .append("]\n");
+                    .append("\n");
         }
         builder.append("We will keep the conversation on that selection until you ask about another one.");
         return builder.toString();
     }
 
-    private Optional<Ticket> findTicketByMessageRef(String normalizedId) {
+    private static String humanize(String value) {
+        if (value == null || value.isBlank()) {
+            return "Support request";
+        }
+        String normalized = value.replace('_', ' ').trim().toLowerCase(Locale.ROOT);
+        return Character.toUpperCase(normalized.charAt(0)) + normalized.substring(1);
+    }
+
+    private Optional<Task> findTaskByMessageRef(String normalizedId) {
         if (normalizedId == null || normalizedId.isBlank()) {
             return Optional.empty();
         }
         return messageRepository
                 .findByExternalThreadRef(normalizedId)
-                .map(m -> ticketResolutionService.resolveCanonical(m.getTicket()));
+                .map(m -> taskResolutionService.resolveCanonical(m.getTask()));
     }
 
     private static Map<String, Object> buildEmailMetadata(InboundEmailRequest request) {
@@ -522,5 +531,5 @@ public class InboundEmailService {
         PROMPTED
     }
 
-    public record InboundEmailResult(String ticketNumber, String messageId, InboundOutcome outcome) {}
+    public record InboundEmailResult(String taskNumber, String messageId, InboundOutcome outcome) {}
 }

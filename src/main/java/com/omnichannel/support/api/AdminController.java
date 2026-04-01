@@ -5,8 +5,8 @@ import com.omnichannel.support.dto.CustomerContactMappingDto;
 import com.omnichannel.support.dto.UpsertCustomerContactMappingRequest;
 import com.omnichannel.support.service.AdminCleanupService;
 import com.omnichannel.support.service.CustomerContactMappingService;
-import com.omnichannel.support.service.TicketOriginReplyService;
-import com.omnichannel.support.service.TicketService;
+import com.omnichannel.support.service.TaskOriginReplyService;
+import com.omnichannel.support.service.TaskService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -28,8 +28,8 @@ public class AdminController {
 
     private final AdminCleanupService adminCleanupService;
     private final CustomerContactMappingService customerContactMappingService;
-    private final TicketService ticketService;
-    private final TicketOriginReplyService ticketOriginReplyService;
+    private final TaskService taskService;
+    private final TaskOriginReplyService taskOriginReplyService;
 
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<AdminCleanupService.AdminSummary>> summary() {
@@ -41,11 +41,11 @@ public class AdminController {
         return ResponseEntity.ok(ApiResponse.success(customerContactMappingService.listAll()));
     }
 
-    @GetMapping("/tickets/{ticketId}/delivery-debug")
-    public ResponseEntity<ApiResponse<TicketOriginReplyService.DeliveryDebug>> ticketDeliveryDebug(
-            @PathVariable("ticketId") String ticketId) {
+    @GetMapping("/tasks/{taskId}/delivery-debug")
+    public ResponseEntity<ApiResponse<TaskOriginReplyService.DeliveryDebug>> taskDeliveryDebug(
+            @PathVariable("taskId") String taskId) {
         return ResponseEntity.ok(ApiResponse.success(
-                ticketOriginReplyService.debugTicketRouting(ticketService.loadCanonicalTicket(ticketId))));
+                taskOriginReplyService.debugTaskRouting(taskService.loadCanonicalTask(taskId))));
     }
 
     @PostMapping("/contact-mappings")

@@ -22,16 +22,16 @@ public class CustomerConversationContextService {
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
-    public Optional<String> activeTicketNumber(String customerId, ChannelType channel) {
+    public Optional<String> activeTaskNumber(String customerId, ChannelType channel) {
         return repository.findByCustomerIdAndChannel(customerId, channel)
-                .map(CustomerConversationContext::getActiveTicketNumber)
+                .map(CustomerConversationContext::getActiveTaskNumber)
                 .filter(value -> value != null && !value.isBlank());
     }
 
     @Transactional
-    public void setActiveTicket(String customerId, ChannelType channel, String ticketNumber) {
+    public void setActiveTask(String customerId, ChannelType channel, String taskNumber) {
         CustomerConversationContext context = loadOrCreate(customerId, channel);
-        context.setActiveTicketNumber(ticketNumber);
+        context.setActiveTaskNumber(taskNumber);
         context.setActiveCustomerJtbdPublicId(null);
         context.setPendingSelectionType(null);
         context.setPendingOptionsJson(null);
@@ -39,9 +39,9 @@ public class CustomerConversationContextService {
     }
 
     @Transactional
-    public void clearActiveTicket(String customerId, ChannelType channel) {
+    public void clearActiveTask(String customerId, ChannelType channel) {
         repository.findByCustomerIdAndChannel(customerId, channel).ifPresent(context -> {
-            context.setActiveTicketNumber(null);
+            context.setActiveTaskNumber(null);
             repository.save(context);
         });
     }
@@ -50,7 +50,7 @@ public class CustomerConversationContextService {
     public void setPendingSelection(
             String customerId, ChannelType channel, PendingSelectionType type, List<SelectionOption> options) {
         CustomerConversationContext context = loadOrCreate(customerId, channel);
-        context.setActiveTicketNumber(null);
+        context.setActiveTaskNumber(null);
         context.setActiveCustomerJtbdPublicId(null);
         context.setPendingSelectionType(type);
         context.setPendingOptionsJson(toJson(options));
@@ -95,9 +95,9 @@ public class CustomerConversationContextService {
     }
 
     @Transactional
-    public void clearTicketReferences(String ticketNumber) {
-        repository.findByActiveTicketNumber(ticketNumber).forEach(context -> {
-            context.setActiveTicketNumber(null);
+    public void clearTaskReferences(String taskNumber) {
+        repository.findByActiveTaskNumber(taskNumber).forEach(context -> {
+            context.setActiveTaskNumber(null);
             repository.save(context);
         });
     }

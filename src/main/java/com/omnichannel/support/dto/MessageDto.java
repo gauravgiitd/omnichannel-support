@@ -11,7 +11,7 @@ import java.util.Map;
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record MessageDto(
         String messageId,
-        String ticketId,
+        String taskId,
         ChannelType channel,
         SenderType senderType,
         String senderIdentifier,

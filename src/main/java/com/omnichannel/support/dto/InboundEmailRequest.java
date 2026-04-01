@@ -21,5 +21,5 @@ public record InboundEmailRequest(
         @Size(max = 64) String policyIdHint,
         @Size(max = 64) String claimIdHint,
         @Size(max = 64) String lobHint,
-        Boolean forceNewTicket,
+        Boolean forceNewTask,
         @Valid List<InboundEmailAttachment> attachments) {}

@@ -43,7 +43,7 @@ public class InboundChannelController {
                 request.policyIdHint(),
                 request.claimIdHint(),
                 request.lobHint(),
-                request.forceNewTicket(),
+                request.forceNewTask(),
                 request.attachments());
         InboundEmailService.InboundEmailResult result = inboundEmailService.ingest(trustedRequest);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));
@@ -59,12 +59,12 @@ public class InboundChannelController {
                 request.bodyText(),
                 request.replyToWaMessageId(),
                 user.customerId(),
-                request.ticketNumberHint(),
+                request.taskNumberHint(),
                 request.issueTypeHint(),
                 request.lobHint(),
                 request.policyIdHint(),
                 request.claimIdHint(),
-                request.forceNewTicket(),
+                request.forceNewTask(),
                 request.attachmentUrls());
         InboundWhatsAppService.InboundWhatsAppResult result = inboundWhatsAppService.ingest(trustedRequest);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));

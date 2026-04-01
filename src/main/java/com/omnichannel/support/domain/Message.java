@@ -30,8 +30,8 @@ public class Message {
     private String publicId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "ticket_id", nullable = false)
-    private Ticket ticket;
+    @JoinColumn(name = "task_id", nullable = false)
+    private Task task;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)

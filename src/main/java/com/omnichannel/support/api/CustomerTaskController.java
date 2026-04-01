@@ -1,11 +1,11 @@
 package com.omnichannel.support.api;
 
 import com.omnichannel.support.dto.ApiResponse;
-import com.omnichannel.support.dto.TicketDto;
+import com.omnichannel.support.dto.TaskDto;
 import com.omnichannel.support.security.AppUser;
 import com.omnichannel.support.security.AuthenticatedUserService;
-import com.omnichannel.support.security.TicketAccessService;
-import com.omnichannel.support.service.TicketService;
+import com.omnichannel.support.security.TaskAccessService;
+import com.omnichannel.support.service.TaskService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,22 +18,22 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/v1/customers")
 @RequiredArgsConstructor
-public class CustomerTicketController {
+public class CustomerTaskController {
 
-    private final TicketService ticketService;
+    private final TaskService taskService;
     private final AuthenticatedUserService authenticatedUserService;
-    private final TicketAccessService ticketAccessService;
+    private final TaskAccessService taskAccessService;
 
-    @GetMapping("/me/tickets")
-    public ResponseEntity<ApiResponse<List<TicketDto>>> listMyTickets(Authentication authentication) {
+    @GetMapping("/me/tasks")
+    public ResponseEntity<ApiResponse<List<TaskDto>>> listMyTasks(Authentication authentication) {
         AppUser user = authenticatedUserService.requireCurrentUser(authentication);
-        return ResponseEntity.ok(ApiResponse.success(ticketService.listTicketsForCustomer(user.customerId())));
+        return ResponseEntity.ok(ApiResponse.success(taskService.listTasksForCustomer(user.customerId())));
     }
 
-    @GetMapping("/{customerId}/tickets")
-    public ResponseEntity<ApiResponse<List<TicketDto>>> listTickets(
+    @GetMapping("/{customerId}/tasks")
+    public ResponseEntity<ApiResponse<List<TaskDto>>> listTasks(
             @PathVariable("customerId") String customerId, Authentication authentication) {
-        ticketAccessService.assertCanAccessCustomer(authentication, customerId);
-        return ResponseEntity.ok(ApiResponse.success(ticketService.listTicketsForCustomer(customerId)));
+        taskAccessService.assertCanAccessCustomer(authentication, customerId);
+        return ResponseEntity.ok(ApiResponse.success(taskService.listTasksForCustomer(customerId)));
     }
 }

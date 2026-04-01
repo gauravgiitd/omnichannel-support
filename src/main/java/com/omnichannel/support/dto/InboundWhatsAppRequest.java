@@ -13,10 +13,10 @@ public record InboundWhatsAppRequest(
         @NotBlank @Size(max = 20_000) String bodyText,
         @Size(max = 32) String replyToWaMessageId,
         @Size(max = 64) String customerIdHint,
-        @Size(max = 64) String ticketNumberHint,
+        @Size(max = 64) String taskNumberHint,
         @Size(max = 128) String issueTypeHint,
         @Size(max = 64) String lobHint,
         @Size(max = 64) String policyIdHint,
         @Size(max = 64) String claimIdHint,
-        Boolean forceNewTicket,
+        Boolean forceNewTask,
         List<@Size(max = 2048) String> attachmentUrls) {}

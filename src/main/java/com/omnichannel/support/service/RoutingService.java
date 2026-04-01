@@ -13,7 +13,7 @@ public class RoutingService {
 
     /**
      * Resolves target queue from issue type + LoB. Rules are evaluated in order; first match wins.
-     * Unmatched combinations go to the triage queue (iterative refinement via ticket PATCH).
+     * Unmatched combinations go to the triage queue (iterative refinement via task PATCH).
      */
     public String resolveQueue(RoutingContext ctx) {
         String issue = normalize(ctx.issueType());

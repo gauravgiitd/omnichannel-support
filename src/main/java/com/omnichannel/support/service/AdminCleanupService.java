@@ -4,16 +4,16 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.omnichannel.support.domain.CustomerIdentityLink;
 import com.omnichannel.support.domain.IdentifierType;
-import com.omnichannel.support.domain.Ticket;
-import com.omnichannel.support.domain.TicketDocument;
+import com.omnichannel.support.domain.Task;
+import com.omnichannel.support.domain.TaskDocument;
 import com.omnichannel.support.error.NotFoundException;
 import com.omnichannel.support.repo.AuditLogRepository;
 import com.omnichannel.support.repo.CustomerContactMappingRepository;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import com.omnichannel.support.repo.MessageRepository;
-import com.omnichannel.support.repo.TicketDocumentRepository;
-import com.omnichannel.support.repo.TicketMergeMapRepository;
-import com.omnichannel.support.repo.TicketRepository;
+import com.omnichannel.support.repo.TaskDocumentRepository;
+import com.omnichannel.support.repo.TaskMergeMapRepository;
+import com.omnichannel.support.repo.TaskRepository;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -27,13 +27,13 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AdminCleanupService {
 
-    private final TicketDocumentRepository ticketDocumentRepository;
+    private final TaskDocumentRepository taskDocumentRepository;
     private final MessageRepository messageRepository;
-    private final TicketMergeMapRepository ticketMergeMapRepository;
+    private final TaskMergeMapRepository taskMergeMapRepository;
     private final CustomerContactMappingRepository customerContactMappingRepository;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
     private final AuditLogRepository auditLogRepository;
-    private final TicketRepository ticketRepository;
+    private final TaskRepository taskRepository;
     private final GoogleDriveStorageService googleDriveStorageService;
     private final ObjectMapper objectMapper;
 
@@ -42,18 +42,18 @@ public class AdminCleanupService {
         Set<String> driveFileIds = new HashSet<>();
         Set<String> driveFolderIds = new HashSet<>();
 
-        ticketDocumentRepository.findAll().forEach(document -> {
+        taskDocumentRepository.findAll().forEach(document -> {
             Map<String, Object> metadata = parseMetadata(document.getMetadataJson());
             addIfPresent(driveFileIds, metadata.get("drive_file_id"));
             addIfPresent(driveFolderIds, metadata.get("drive_folder_id"));
         });
 
-        int documentCount = ticketDocumentRepository.findAll().size();
+        int documentCount = taskDocumentRepository.findAll().size();
         int messageCount = messageRepository.findAll().size();
-        int mergeCount = ticketMergeMapRepository.findAll().size();
+        int mergeCount = taskMergeMapRepository.findAll().size();
         int identityCount = customerIdentityLinkRepository.findAll().size();
         int auditCount = auditLogRepository.findAll().size();
-        int ticketCount = ticketRepository.findAll().size();
+        int taskCount = taskRepository.findAll().size();
 
         int deletedDriveFiles = 0;
         int deletedDriveFolders = 0;
@@ -77,13 +77,13 @@ public class AdminCleanupService {
 
         auditLogRepository.deleteAllInBatch();
         messageRepository.deleteAllInBatch();
-        ticketDocumentRepository.deleteAllInBatch();
-        ticketMergeMapRepository.deleteAllInBatch();
+        taskDocumentRepository.deleteAllInBatch();
+        taskMergeMapRepository.deleteAllInBatch();
         customerIdentityLinkRepository.deleteAllInBatch();
-        ticketRepository.deleteAllInBatch();
+        taskRepository.deleteAllInBatch();
 
         return new CleanupResult(
-                ticketCount,
+                taskCount,
                 documentCount,
                 messageCount,
                 identityCount,
@@ -97,9 +97,9 @@ public class AdminCleanupService {
     @Transactional
     public CustomerCleanupResult cleanupCustomerData(String customerId) {
         String normalizedCustomerId = customerId == null ? null : customerId.trim();
-        List<Ticket> tickets = normalizedCustomerId == null || normalizedCustomerId.isBlank()
+        List<Task> tasks = normalizedCustomerId == null || normalizedCustomerId.isBlank()
                 ? List.of()
-                : ticketRepository.findByCustomerIdOrderByCreatedAtDesc(normalizedCustomerId);
+                : taskRepository.findByCustomerIdOrderByCreatedAtDesc(normalizedCustomerId);
         List<CustomerIdentityLink> identityLinks = normalizedCustomerId == null || normalizedCustomerId.isBlank()
                 ? List.of()
                 : customerIdentityLinkRepository.findByCustomerId(normalizedCustomerId);
@@ -119,15 +119,15 @@ public class AdminCleanupService {
                 .filter(mapping -> emails.contains(mapping.getEmail()) || phones.contains(mapping.getPhone()))
                 .toList();
 
-        if (tickets.isEmpty() && identityLinks.isEmpty()) {
+        if (tasks.isEmpty() && identityLinks.isEmpty()) {
             throw new NotFoundException("no customer data found for " + normalizedCustomerId);
         }
 
-        List<TicketDocument> documents = tickets.isEmpty() ? List.of() : ticketDocumentRepository.findByTicketIn(tickets);
-        List<com.omnichannel.support.domain.Message> messages = tickets.isEmpty() ? List.of() : messageRepository.findByTicketIn(tickets);
-        List<com.omnichannel.support.domain.TicketMergeMap> merges = tickets.isEmpty()
+        List<TaskDocument> documents = tasks.isEmpty() ? List.of() : taskDocumentRepository.findByTaskIn(tasks);
+        List<com.omnichannel.support.domain.Message> messages = tasks.isEmpty() ? List.of() : messageRepository.findByTaskIn(tasks);
+        List<com.omnichannel.support.domain.TaskMergeMap> merges = tasks.isEmpty()
                 ? List.of()
-                : ticketMergeMapRepository.findByPrimaryTicketInOrMergedTicketIn(tickets, tickets);
+                : taskMergeMapRepository.findByPrimaryTaskInOrMergedTaskIn(tasks, tasks);
 
         Set<String> driveFileIds = new HashSet<>();
         Set<String> driveFolderIds = new HashSet<>();
@@ -137,15 +137,15 @@ public class AdminCleanupService {
             addIfPresent(driveFolderIds, metadata.get("drive_folder_id"));
         });
 
-        Set<String> ticketNumbers = tickets.stream().map(Ticket::getTicketNumber).collect(java.util.stream.Collectors.toSet());
+        Set<String> taskNumbers = tasks.stream().map(Task::getTaskNumber).collect(java.util.stream.Collectors.toSet());
         Set<String> documentIds =
-                documents.stream().map(TicketDocument::getPublicId).collect(java.util.stream.Collectors.toSet());
+                documents.stream().map(TaskDocument::getPublicId).collect(java.util.stream.Collectors.toSet());
         Set<String> messageIds = messages.stream()
                 .map(com.omnichannel.support.domain.Message::getPublicId)
                 .collect(java.util.stream.Collectors.toSet());
 
         List<com.omnichannel.support.domain.AuditLogEntry> auditLogs = auditLogRepository.findAll().stream()
-                .filter(entry -> ticketNumbers.contains(entry.getEntityId())
+                .filter(entry -> taskNumbers.contains(entry.getEntityId())
                         || documentIds.contains(entry.getEntityId())
                         || messageIds.contains(entry.getEntityId()))
                 .toList();
@@ -176,21 +176,21 @@ public class AdminCleanupService {
             messageRepository.deleteAllInBatch(messages);
         }
         if (!documents.isEmpty()) {
-            ticketDocumentRepository.deleteAllInBatch(documents);
+            taskDocumentRepository.deleteAllInBatch(documents);
         }
         if (!merges.isEmpty()) {
-            ticketMergeMapRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(merges)));
+            taskMergeMapRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(merges)));
         }
         if (!identityLinks.isEmpty()) {
             customerIdentityLinkRepository.deleteAllInBatch(identityLinks);
         }
-        if (!tickets.isEmpty()) {
-            ticketRepository.deleteAllInBatch(tickets);
+        if (!tasks.isEmpty()) {
+            taskRepository.deleteAllInBatch(tasks);
         }
 
         return new CustomerCleanupResult(
                 normalizedCustomerId,
-                tickets.size(),
+                tasks.size(),
                 documents.size(),
                 messages.size(),
                 identityLinks.size(),
@@ -203,13 +203,13 @@ public class AdminCleanupService {
 
     public AdminSummary summary() {
         return new AdminSummary(
-                ticketRepository.count(),
-                ticketDocumentRepository.count(),
+                taskRepository.count(),
+                taskDocumentRepository.count(),
                 messageRepository.count(),
                 customerContactMappingRepository.count(),
                 customerIdentityLinkRepository.count(),
                 auditLogRepository.count(),
-                ticketMergeMapRepository.count());
+                taskMergeMapRepository.count());
     }
 
     private Map<String, Object> parseMetadata(String json) {
@@ -230,7 +230,7 @@ public class AdminCleanupService {
     }
 
     public record AdminSummary(
-            long tickets,
+            long tasks,
             long documents,
             long messages,
             long contactMappings,
@@ -239,7 +239,7 @@ public class AdminCleanupService {
             long merges) {}
 
     public record CleanupResult(
-            int deletedTickets,
+            int deletedTasks,
             int deletedDocuments,
             int deletedMessages,
             int deletedIdentityLinks,
@@ -251,7 +251,7 @@ public class AdminCleanupService {
 
     public record CustomerCleanupResult(
             String customerId,
-            int deletedTickets,
+            int deletedTasks,
             int deletedDocuments,
             int deletedMessages,
             int deletedIdentityLinks,

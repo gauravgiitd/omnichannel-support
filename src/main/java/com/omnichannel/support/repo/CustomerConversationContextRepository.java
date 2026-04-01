@@ -10,5 +10,5 @@ public interface CustomerConversationContextRepository extends JpaRepository<Cus
 
     Optional<CustomerConversationContext> findByCustomerIdAndChannel(String customerId, ChannelType channel);
 
-    List<CustomerConversationContext> findByActiveTicketNumber(String activeTicketNumber);
+    List<CustomerConversationContext> findByActiveTaskNumber(String activeTaskNumber);
 }

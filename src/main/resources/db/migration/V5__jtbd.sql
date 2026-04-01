@@ -31,14 +31,14 @@ CREATE TABLE customer_jtbds (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-ALTER TABLE tickets
+ALTER TABLE tasks
     ADD COLUMN customer_jtbd_id BIGINT NULL REFERENCES customer_jtbds(id) ON DELETE SET NULL;
 
 CREATE TABLE customer_conversation_contexts (
     id BIGSERIAL PRIMARY KEY,
     customer_id VARCHAR(64) NOT NULL,
     channel VARCHAR(32) NOT NULL,
-    active_ticket_number VARCHAR(32),
+    active_task_number VARCHAR(32),
     active_customer_jtbd_public_id VARCHAR(36),
     pending_selection_type VARCHAR(32),
     pending_options_json TEXT,

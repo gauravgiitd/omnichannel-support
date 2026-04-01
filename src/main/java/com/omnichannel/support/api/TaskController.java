@@ -1,18 +1,18 @@
 package com.omnichannel.support.api;
 
 import com.omnichannel.support.dto.ApiResponse;
-import com.omnichannel.support.dto.CreateAuthenticatedTicketRequest;
-import com.omnichannel.support.dto.CreateTicketRequest;
-import com.omnichannel.support.dto.MergeTicketsRequest;
+import com.omnichannel.support.dto.CreateAuthenticatedTaskRequest;
+import com.omnichannel.support.dto.CreateTaskRequest;
+import com.omnichannel.support.dto.MergeTasksRequest;
 import com.omnichannel.support.dto.MessageDto;
-import com.omnichannel.support.dto.PatchTicketRequest;
+import com.omnichannel.support.dto.PatchTaskRequest;
 import com.omnichannel.support.dto.PostMessageRequest;
-import com.omnichannel.support.dto.TicketDto;
+import com.omnichannel.support.dto.TaskDto;
 import com.omnichannel.support.security.AppUser;
 import com.omnichannel.support.security.AuthenticatedUserService;
-import com.omnichannel.support.security.TicketAccessService;
-import com.omnichannel.support.service.TicketMergeService;
-import com.omnichannel.support.service.TicketService;
+import com.omnichannel.support.security.TaskAccessService;
+import com.omnichannel.support.service.TaskMergeService;
+import com.omnichannel.support.service.TaskService;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -29,31 +29,31 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/v1/tickets")
+@RequestMapping("/v1/tasks")
 @RequiredArgsConstructor
-public class TicketController {
+public class TaskController {
 
-    private final TicketService ticketService;
-    private final TicketMergeService ticketMergeService;
-    private final TicketAccessService ticketAccessService;
+    private final TaskService taskService;
+    private final TaskMergeService taskMergeService;
+    private final TaskAccessService taskAccessService;
     private final AuthenticatedUserService authenticatedUserService;
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<TicketDto>>> listTickets() {
-        return ResponseEntity.ok(ApiResponse.success(ticketService.listAllTickets()));
+    public ResponseEntity<ApiResponse<List<TaskDto>>> listTasks() {
+        return ResponseEntity.ok(ApiResponse.success(taskService.listAllTasks()));
     }
 
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ApiResponse<TicketDto>> createTicket(@Valid @RequestBody CreateTicketRequest request) {
-        TicketDto created = ticketService.createTicket(request);
+    public ResponseEntity<ApiResponse<TaskDto>> createTask(@Valid @RequestBody CreateTaskRequest request) {
+        TaskDto created = taskService.createTask(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(created));
     }
 
     @PostMapping(path = "/me", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ApiResponse<TicketDto>> createMyTicket(
-            @Valid @RequestBody CreateAuthenticatedTicketRequest request, Authentication authentication) {
+    public ResponseEntity<ApiResponse<TaskDto>> createMyTask(
+            @Valid @RequestBody CreateAuthenticatedTaskRequest request, Authentication authentication) {
         AppUser user = authenticatedUserService.requireCurrentUser(authentication);
-        CreateTicketRequest trustedRequest = new CreateTicketRequest(
+        CreateTaskRequest trustedRequest = new CreateTaskRequest(
                 user.customerId(),
                 request.issueType(),
                 request.lob(),
@@ -65,36 +65,36 @@ public class TicketController {
                 user.email(),
                 request.initialMessageMetadata(),
                 request.initialExternalThreadRef());
-        TicketDto created = ticketService.createTicket(trustedRequest);
+        TaskDto created = taskService.createTask(trustedRequest);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(created));
     }
 
-    @GetMapping("/{ticketId}")
-    public ResponseEntity<ApiResponse<TicketDto>> getTicket(
-            @PathVariable("ticketId") String ticketId, Authentication authentication) {
-        ticketAccessService.assertCanAccessTicket(authentication, ticketId);
-        return ResponseEntity.ok(ApiResponse.success(ticketService.getTicket(ticketId)));
+    @GetMapping("/{taskId}")
+    public ResponseEntity<ApiResponse<TaskDto>> getTask(
+            @PathVariable("taskId") String taskId, Authentication authentication) {
+        taskAccessService.assertCanAccessTask(authentication, taskId);
+        return ResponseEntity.ok(ApiResponse.success(taskService.getTask(taskId)));
     }
 
-    @PatchMapping(path = "/{ticketId}", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ApiResponse<TicketDto>> patchTicket(
-            @PathVariable("ticketId") String ticketId, @Valid @RequestBody PatchTicketRequest request) {
-        return ResponseEntity.ok(ApiResponse.success(ticketService.patchTicket(ticketId, request)));
+    @PatchMapping(path = "/{taskId}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<TaskDto>> patchTask(
+            @PathVariable("taskId") String taskId, @Valid @RequestBody PatchTaskRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(taskService.patchTask(taskId, request)));
     }
 
-    @GetMapping("/{ticketId}/messages")
+    @GetMapping("/{taskId}/messages")
     public ResponseEntity<ApiResponse<List<MessageDto>>> listMessages(
-            @PathVariable("ticketId") String ticketId, Authentication authentication) {
-        ticketAccessService.assertCanAccessTicket(authentication, ticketId);
-        return ResponseEntity.ok(ApiResponse.success(ticketService.listMessages(ticketId)));
+            @PathVariable("taskId") String taskId, Authentication authentication) {
+        taskAccessService.assertCanAccessTask(authentication, taskId);
+        return ResponseEntity.ok(ApiResponse.success(taskService.listMessages(taskId)));
     }
 
-    @PostMapping(path = "/{ticketId}/messages", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PostMapping(path = "/{taskId}/messages", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiResponse<MessageDto>> postMessage(
-            @PathVariable("ticketId") String ticketId,
+            @PathVariable("taskId") String taskId,
             @Valid @RequestBody PostMessageRequest request,
             Authentication authentication) {
-        ticketAccessService.assertCanAccessTicket(authentication, ticketId);
+        taskAccessService.assertCanAccessTask(authentication, taskId);
         PostMessageRequest trustedRequest = request;
         if (!authenticatedUserService.isAgent(authentication)) {
             AppUser user = authenticatedUserService.requireCurrentUser(authentication);
@@ -107,14 +107,14 @@ public class TicketController {
                     request.externalThreadRef(),
                     request.metadata());
         }
-        MessageDto message = ticketService.postMessage(ticketId, trustedRequest);
+        MessageDto message = taskService.postMessage(taskId, trustedRequest);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(message));
     }
 
     @PostMapping(path = "/merge", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ApiResponse<Void>> mergeTickets(@Valid @RequestBody MergeTicketsRequest request) {
-        ticketMergeService.mergeTickets(
-                request.primaryTicketNumber(), request.mergedTicketNumber(), request.mergedByActor());
+    public ResponseEntity<ApiResponse<Void>> mergeTasks(@Valid @RequestBody MergeTasksRequest request) {
+        taskMergeService.mergeTasks(
+                request.primaryTaskNumber(), request.mergedTaskNumber(), request.mergedByActor());
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 }

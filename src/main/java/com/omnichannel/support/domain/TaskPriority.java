@@ -1,6 +1,6 @@
 package com.omnichannel.support.domain;
 
-public enum TicketPriority {
+public enum TaskPriority {
     LOW,
     MEDIUM,
     HIGH,

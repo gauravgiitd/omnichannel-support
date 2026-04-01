@@ -1,6 +1,6 @@
 package com.omnichannel.support.security;
 
-import com.omnichannel.support.domain.Ticket;
+import com.omnichannel.support.domain.Task;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -8,19 +8,19 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class TicketAccessService {
+public class TaskAccessService {
 
     private final AuthenticatedUserService authenticatedUserService;
-    private final com.omnichannel.support.service.TicketService ticketService;
+    private final com.omnichannel.support.service.TaskService taskService;
 
-    public void assertCanAccessTicket(Authentication authentication, String ticketNumber) {
+    public void assertCanAccessTask(Authentication authentication, String taskNumber) {
         if (authenticatedUserService.isAgent(authentication)) {
             return;
         }
         AppUser user = authenticatedUserService.requireCurrentUser(authentication);
-        Ticket ticket = ticketService.loadCanonicalTicket(ticketNumber);
-        if (!ticket.getCustomerId().equals(user.customerId())) {
-            throw new AccessDeniedException("You do not have access to this ticket");
+        Task task = taskService.loadCanonicalTask(taskNumber);
+        if (!task.getCustomerId().equals(user.customerId())) {
+            throw new AccessDeniedException("You do not have access to this task");
         }
     }
 

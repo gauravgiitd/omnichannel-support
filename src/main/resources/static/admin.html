@@ -78,18 +78,18 @@
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Routing Debug</p>
-                        <h3>Inspect ticket delivery routing</h3>
+                        <h3>Inspect task delivery routing</h3>
                     </div>
                 </div>
-                <form id="ticketDeliveryDebugForm" class="stack-form">
+                <form id="taskDeliveryDebugForm" class="stack-form">
                     <label>
-                        Ticket ID
-                        <input name="ticketId" type="text" placeholder="TKT-123456" required>
+                        Task ID
+                        <input name="taskId" type="text" placeholder="TSK-123456" required>
                     </label>
-                    <button type="submit">Inspect ticket routing</button>
+                    <button type="submit">Inspect task routing</button>
                 </form>
-                <div id="ticketDeliveryDebugSummary" class="small-note"></div>
-                <pre id="ticketDeliveryDebugResult" class="small-note" style="white-space: pre-wrap;">No ticket inspected yet.</pre>
+                <div id="taskDeliveryDebugSummary" class="small-note"></div>
+                <pre id="taskDeliveryDebugResult" class="small-note" style="white-space: pre-wrap;">No task inspected yet.</pre>
             </section>
 
             <section class="panel">
@@ -109,7 +109,7 @@
                         <input name="confirmation" type="text" placeholder="DELETE CUSTOMER DATA" required>
                     </label>
                     <p class="small-note">
-                        This removes the selected customer's tickets, messages, documents, identity links,
+                        This removes the selected customer's tasks, messages, documents, identity links,
                         merge rows, audit entries, and app-managed Drive files/folders tied to that customer.
                         Email-to-phone mappings are preserved.
                     </p>
@@ -131,7 +131,7 @@
                         <input name="confirmation" type="text" placeholder="DELETE ALL DATA" required>
                     </label>
                     <p class="small-note">
-                        This removes customers, tickets, messages, documents, audit records, merge data,
+                        This removes customers, tasks, messages, documents, audit records, merge data,
                         identity links, and Drive-backed files/folders created by the prototype.
                         Email-to-phone mappings are preserved.
                     </p>

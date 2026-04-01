@@ -3,19 +3,19 @@ package com.omnichannel.support.service;
 import com.omnichannel.support.domain.ChannelType;
 import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.SenderType;
-import com.omnichannel.support.domain.Ticket;
-import com.omnichannel.support.domain.TicketStatus;
-import com.omnichannel.support.dto.CreateTicketRequest;
+import com.omnichannel.support.domain.Task;
+import com.omnichannel.support.domain.TaskStatus;
+import com.omnichannel.support.dto.CreateTaskRequest;
 import com.omnichannel.support.dto.DocumentDto;
 import com.omnichannel.support.dto.MessageDto;
-import com.omnichannel.support.dto.PatchTicketRequest;
+import com.omnichannel.support.dto.PatchTaskRequest;
 import com.omnichannel.support.dto.PostMessageRequest;
 import com.omnichannel.support.dto.RegisterDocumentRequest;
-import com.omnichannel.support.dto.TicketDto;
+import com.omnichannel.support.dto.TaskDto;
 import com.omnichannel.support.error.NotFoundException;
 import com.omnichannel.support.error.ValidationException;
-import com.omnichannel.support.repo.TicketMergeMapRepository;
-import com.omnichannel.support.repo.TicketRepository;
+import com.omnichannel.support.repo.TaskMergeMapRepository;
+import com.omnichannel.support.repo.TaskRepository;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -30,62 +30,62 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
-public class TicketService {
+public class TaskService {
 
-    private static final Set<TicketStatus> OPEN_LIKE =
+    private static final Set<TaskStatus> OPEN_LIKE =
             EnumSet.of(
-                    TicketStatus.OPEN,
-                    TicketStatus.ASSIGNED,
-                    TicketStatus.PENDING_CUSTOMER,
-                    TicketStatus.PENDING_INTERNAL,
-                    TicketStatus.REOPENED);
+                    TaskStatus.OPEN,
+                    TaskStatus.ASSIGNED,
+                    TaskStatus.PENDING_CUSTOMER,
+                    TaskStatus.PENDING_INTERNAL,
+                    TaskStatus.REOPENED);
 
-    private final TicketRepository ticketRepository;
-    private final TicketMergeMapRepository ticketMergeMapRepository;
-    private final TicketNumberGenerator ticketNumberGenerator;
+    private final TaskRepository taskRepository;
+    private final TaskMergeMapRepository taskMergeMapRepository;
+    private final TaskNumberGenerator taskNumberGenerator;
     private final ConversationService conversationService;
-    private final TicketResolutionService ticketResolutionService;
+    private final TaskResolutionService taskResolutionService;
     private final AuditService auditService;
     private final DocumentService documentService;
     private final RoutingService routingService;
-    private final TicketEmailNotificationService ticketEmailNotificationService;
-    private final TicketOriginReplyService ticketOriginReplyService;
+    private final TaskEmailNotificationService taskEmailNotificationService;
+    private final TaskOriginReplyService taskOriginReplyService;
 
     @Transactional
-    public TicketDto createTicket(CreateTicketRequest request) {
-        return createTicket(request, null);
+    public TaskDto createTask(CreateTaskRequest request) {
+        return createTask(request, null);
     }
 
     @Transactional
-    public TicketDto createTicket(CreateTicketRequest request, CustomerJtbd customerJtbd) {
-        Ticket ticket = new Ticket();
-        ticket.setTicketNumber(ticketNumberGenerator.newTicketNumber());
-        ticket.setCustomerId(request.customerId());
-        ticket.setCustomerJtbd(customerJtbd);
-        ticket.setIssueType(request.issueType().trim());
-        ticket.setLob(blankToNull(request.lob()));
-        ticket.setClaimId(blankToNull(request.claimId()));
-        ticket.setPolicyId(blankToNull(request.policyId()));
-        ticket.setStatus(TicketStatus.OPEN);
-        ticket.setPriority(request.priority());
-        ticket.setSourceChannel(request.sourceChannel());
-        ticket.setAssignedQueue(
+    public TaskDto createTask(CreateTaskRequest request, CustomerJtbd customerJtbd) {
+        Task task = new Task();
+        task.setTaskNumber(taskNumberGenerator.newTaskNumber());
+        task.setCustomerId(request.customerId());
+        task.setCustomerJtbd(customerJtbd);
+        task.setIssueType(request.issueType().trim());
+        task.setLob(blankToNull(request.lob()));
+        task.setClaimId(blankToNull(request.claimId()));
+        task.setPolicyId(blankToNull(request.policyId()));
+        task.setStatus(TaskStatus.OPEN);
+        task.setPriority(request.priority());
+        task.setSourceChannel(request.sourceChannel());
+        task.setAssignedQueue(
                 routingService.resolveQueue(
                         RoutingContext.builder()
-                                .issueType(ticket.getIssueType())
-                                .lob(ticket.getLob())
-                                .claimId(ticket.getClaimId())
-                                .policyId(ticket.getPolicyId())
-                                .customerId(ticket.getCustomerId())
+                                .issueType(task.getIssueType())
+                                .lob(task.getLob())
+                                .claimId(task.getClaimId())
+                                .policyId(task.getPolicyId())
+                                .customerId(task.getCustomerId())
                                 .build()));
-        ticketRepository.save(ticket);
+        taskRepository.save(task);
 
         String sender =
                 request.senderIdentifier() != null && !request.senderIdentifier().isBlank()
                         ? request.senderIdentifier()
                         : request.customerId();
         conversationService.appendMessage(
-                ticket,
+                task,
                 request.sourceChannel(),
                 SenderType.CUSTOMER,
                 sender,
@@ -98,68 +98,68 @@ public class TicketService {
 
         auditService.record(
                 "TICKET_CREATED",
-                "Ticket",
-                ticket.getTicketNumber(),
+                "Task",
+                task.getTaskNumber(),
                 "SYSTEM",
-                "ticket-service",
+                "task-service",
                         java.util.Map.of(
                                 "channel",
                                 request.sourceChannel().name(),
                                 "assigned_queue",
-                                ticket.getAssignedQueue() != null ? ticket.getAssignedQueue() : ""));
+                                task.getAssignedQueue() != null ? task.getAssignedQueue() : ""));
 
-        ticketEmailNotificationService.sendTicketCreatedNotifications(ticket);
+        taskEmailNotificationService.sendTaskCreatedNotifications(task);
 
-        return toDto(ticket);
+        return toDto(task);
     }
 
     @Transactional
-    public TicketDto patchTicket(String ticketNumber, PatchTicketRequest request) {
-        Ticket ticket = loadCanonicalTicket(ticketNumber);
+    public TaskDto patchTask(String taskNumber, PatchTaskRequest request) {
+        Task task = loadCanonicalTask(taskNumber);
         if (request.issueType() != null && !request.issueType().isBlank()) {
-            ticket.setIssueType(request.issueType().trim());
+            task.setIssueType(request.issueType().trim());
         }
         if (request.lob() != null) {
-            ticket.setLob(blankToNull(request.lob()));
+            task.setLob(blankToNull(request.lob()));
         }
         if (request.claimId() != null) {
-            ticket.setClaimId(blankToNull(request.claimId()));
+            task.setClaimId(blankToNull(request.claimId()));
         }
         if (request.policyId() != null) {
-            ticket.setPolicyId(blankToNull(request.policyId()));
+            task.setPolicyId(blankToNull(request.policyId()));
         }
         if (request.assignedAgent() != null) {
-            ticket.setAssignedAgent(blankToNull(request.assignedAgent()));
+            task.setAssignedAgent(blankToNull(request.assignedAgent()));
         }
         if (request.status() != null) {
-            ticket.setStatus(request.status());
+            task.setStatus(request.status());
         }
         boolean explicitQueue = request.assignedQueue() != null && !request.assignedQueue().isBlank();
         if (explicitQueue) {
-            ticket.setAssignedQueue(request.assignedQueue().trim());
+            task.setAssignedQueue(request.assignedQueue().trim());
         } else if (routingFieldsPresentInPatch(request)) {
-            ticket.setAssignedQueue(
+            task.setAssignedQueue(
                     routingService.resolveQueue(
                             RoutingContext.builder()
-                                    .issueType(ticket.getIssueType())
-                                    .lob(ticket.getLob())
-                                    .claimId(ticket.getClaimId())
-                                    .policyId(ticket.getPolicyId())
-                                    .customerId(ticket.getCustomerId())
+                                    .issueType(task.getIssueType())
+                                    .lob(task.getLob())
+                                    .claimId(task.getClaimId())
+                                    .policyId(task.getPolicyId())
+                                    .customerId(task.getCustomerId())
                                     .build()));
         }
-        ticketRepository.save(ticket);
+        taskRepository.save(task);
         auditService.record(
                 "TICKET_UPDATED",
-                "Ticket",
-                ticket.getTicketNumber(),
+                "Task",
+                task.getTaskNumber(),
                 "SYSTEM",
-                "ticket-service",
-                java.util.Map.of("queue", ticket.getAssignedQueue() != null ? ticket.getAssignedQueue() : ""));
-        return toDto(ticket);
+                "task-service",
+                java.util.Map.of("queue", task.getAssignedQueue() != null ? task.getAssignedQueue() : ""));
+        return toDto(task);
     }
 
-    private static boolean routingFieldsPresentInPatch(PatchTicketRequest request) {
+    private static boolean routingFieldsPresentInPatch(PatchTaskRequest request) {
         return request.issueType() != null
                 || request.lob() != null
                 || request.claimId() != null
@@ -174,30 +174,30 @@ public class TicketService {
     }
 
     @Transactional(readOnly = true)
-    public List<TicketDto> listAllTickets() {
-        return ticketRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
-                .filter(t -> !ticketMergeMapRepository.existsByMergedTicket(t))
-                .map(ticketResolutionService::resolveCanonical)
+    public List<TaskDto> listAllTasks() {
+        return taskRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
+                .filter(t -> !taskMergeMapRepository.existsByMergedTask(t))
+                .map(taskResolutionService::resolveCanonical)
                 .distinct()
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public TicketDto getTicket(String ticketNumber) {
-        Ticket ticket = loadCanonicalTicket(ticketNumber);
-        return toDto(ticket);
+    public TaskDto getTask(String taskNumber) {
+        Task task = loadCanonicalTask(taskNumber);
+        return toDto(task);
     }
 
     @Transactional(readOnly = true)
-    public List<MessageDto> listMessages(String ticketNumber) {
-        Ticket ticket = loadCanonicalTicket(ticketNumber);
-        return conversationService.listTimeline(ticket);
+    public List<MessageDto> listMessages(String taskNumber) {
+        Task task = loadCanonicalTask(taskNumber);
+        return conversationService.listTimeline(task);
     }
 
     @Transactional
-    public MessageDto postMessage(String ticketNumber, PostMessageRequest request) {
-        Ticket ticket = loadCanonicalTicket(ticketNumber);
+    public MessageDto postMessage(String taskNumber, PostMessageRequest request) {
+        Task task = loadCanonicalTask(taskNumber);
         Map<String, Object> metadata = new HashMap<>();
         if (request.metadata() != null) {
             metadata.putAll(request.metadata());
@@ -206,8 +206,8 @@ public class TicketService {
         String externalThreadRef = request.externalThreadRef();
         if (request.senderType() == SenderType.AGENT) {
             try {
-                TicketOriginReplyService.OutboundDeliveryResult delivery =
-                        ticketOriginReplyService.deliverAgentReply(ticket, request.senderIdentifier(), request.body());
+                TaskOriginReplyService.OutboundDeliveryResult delivery =
+                        taskOriginReplyService.deliverAgentReply(task, request.senderIdentifier(), request.body());
                 if (delivery.metadata() != null) {
                     metadata.putAll(delivery.metadata());
                 }
@@ -219,7 +219,7 @@ public class TicketService {
             } catch (ValidationException ex) {
                 metadata.put("delivery_status", "failed");
                 metadata.put("delivery_error", ex.getMessage());
-                metadata.put("delivery_channel", ticket.getSourceChannel().name());
+                metadata.put("delivery_channel", task.getSourceChannel().name());
             }
         }
         PostMessageRequest effectiveRequest = new PostMessageRequest(
@@ -232,7 +232,7 @@ public class TicketService {
                 metadata);
         MessageDto message =
                 conversationService.appendMessage(
-                        ticket,
+                        task,
                         effectiveRequest.channel(),
                         effectiveRequest.senderType(),
                         effectiveRequest.senderIdentifier(),
@@ -247,28 +247,28 @@ public class TicketService {
                 message.messageId(),
                 effectiveRequest.senderType().name(),
                 effectiveRequest.senderIdentifier(),
-                java.util.Map.of("ticket", ticket.getTicketNumber(), "channel", effectiveRequest.channel().name()));
+                java.util.Map.of("task", task.getTaskNumber(), "channel", effectiveRequest.channel().name()));
 
         return message;
     }
 
     @Transactional(readOnly = true)
-    public List<DocumentDto> listDocuments(String ticketNumber) {
-        Ticket ticket = loadCanonicalTicket(ticketNumber);
-        return documentService.listByTicket(ticket);
+    public List<DocumentDto> listDocuments(String taskNumber) {
+        Task task = loadCanonicalTask(taskNumber);
+        return documentService.listByTask(task);
     }
 
     @Transactional
-    public DocumentDto registerDocument(String ticketNumber, RegisterDocumentRequest request) {
-        Ticket ticket = loadCanonicalTicket(ticketNumber);
+    public DocumentDto registerDocument(String taskNumber, RegisterDocumentRequest request) {
+        Task task = loadCanonicalTask(taskNumber);
         Map<String, Object> meta = new HashMap<>();
         if (request.metadata() != null) {
             meta.putAll(request.metadata());
         }
         DocumentDto doc =
                 documentService.register(
-                        ticket,
-                        ticket.getCustomerId(),
+                        task,
+                        task.getCustomerId(),
                         request.channel(),
                         request.fileUrl(),
                         request.documentType(),
@@ -278,15 +278,15 @@ public class TicketService {
 
         if (request.senderType() == SenderType.AGENT) {
             try {
-                TicketOriginReplyService.OutboundDeliveryResult delivery =
-                        ticketOriginReplyService.deliverAgentDocument(
-                                ticket, request.senderIdentifier(), doc, request.messageBody());
+                TaskOriginReplyService.OutboundDeliveryResult delivery =
+                        taskOriginReplyService.deliverAgentDocument(
+                                task, request.senderIdentifier(), doc, request.messageBody());
                 meta.putAll(delivery.metadata());
                 meta.put("delivery_status", "sent");
             } catch (ValidationException ex) {
                 meta.put("delivery_status", "failed");
                 meta.put("delivery_error", ex.getMessage());
-                meta.put("delivery_channel", ticket.getSourceChannel().name());
+                meta.put("delivery_channel", task.getSourceChannel().name());
             }
         }
 
@@ -299,7 +299,7 @@ public class TicketService {
             messageMeta.put("recipient", meta.get("recipient"));
         }
         conversationService.appendMessage(
-                ticket,
+                task,
                 request.channel(),
                 request.senderType(),
                 request.senderIdentifier(),
@@ -310,8 +310,8 @@ public class TicketService {
 
         auditService.record(
                 "DOCUMENT_MESSAGE_APPENDED",
-                "Ticket",
-                ticket.getTicketNumber(),
+                "Task",
+                task.getTaskNumber(),
                 request.senderType().name(),
                 request.senderIdentifier(),
                 Map.of("document_id", doc.documentId()));
@@ -327,55 +327,55 @@ public class TicketService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<Ticket> findSingleOpenTicketForCustomer(String customerId) {
-        List<Ticket> open = findOpenTicketsForCustomer(customerId);
+    public Optional<Task> findSingleOpenTaskForCustomer(String customerId) {
+        List<Task> open = findOpenTasksForCustomer(customerId);
         if (open.size() != 1) {
             return Optional.empty();
         }
-        return Optional.of(ticketResolutionService.resolveCanonical(open.get(0)));
+        return Optional.of(taskResolutionService.resolveCanonical(open.get(0)));
     }
 
     @Transactional(readOnly = true)
-    public List<TicketDto> listTicketsForCustomer(String customerId) {
-        return ticketRepository.findByCustomerIdOrderByCreatedAtDesc(customerId).stream()
-                .filter(t -> !ticketMergeMapRepository.existsByMergedTicket(t))
-                .map(ticketResolutionService::resolveCanonical)
+    public List<TaskDto> listTasksForCustomer(String customerId) {
+        return taskRepository.findByCustomerIdOrderByCreatedAtDesc(customerId).stream()
+                .filter(t -> !taskMergeMapRepository.existsByMergedTask(t))
+                .map(taskResolutionService::resolveCanonical)
                 .distinct()
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
-    public Ticket loadCanonicalTicket(String ticketNumber) {
-        Ticket ticket =
-                ticketRepository
-                        .findByTicketNumber(ticketNumber)
-                        .orElseThrow(() -> new NotFoundException("ticket not found"));
-        return ticketResolutionService.resolveCanonical(ticket);
+    public Task loadCanonicalTask(String taskNumber) {
+        Task task =
+                taskRepository
+                        .findByTaskNumber(taskNumber)
+                        .orElseThrow(() -> new NotFoundException("task not found"));
+        return taskResolutionService.resolveCanonical(task);
     }
 
-    private TicketDto toDto(Ticket ticket) {
-        return new TicketDto(
-                ticket.getTicketNumber(),
-                ticket.getCustomerId(),
-                ticket.getCustomerJtbd() != null ? ticket.getCustomerJtbd().getPublicId() : null,
-                ticket.getCustomerJtbd() != null ? ticket.getCustomerJtbd().getJtbdType().getName() : null,
-                ticket.getCustomerJtbd() != null ? ticket.getCustomerJtbd().getCurrentStage().getStageName() : null,
-                ticket.getCustomerJtbd() != null ? ticket.getCustomerJtbd().getStatus().name() : null,
-                ticket.getIssueType(),
-                ticket.getLob(),
-                ticket.getClaimId(),
-                ticket.getPolicyId(),
-                ticket.getStatus(),
-                ticket.getPriority(),
-                ticket.getSourceChannel(),
-                ticket.getAssignedQueue(),
-                ticket.getAssignedAgent(),
-                ticket.getCreatedAt(),
-                ticket.getUpdatedAt());
+    private TaskDto toDto(Task task) {
+        return new TaskDto(
+                task.getTaskNumber(),
+                task.getCustomerId(),
+                task.getCustomerJtbd() != null ? task.getCustomerJtbd().getPublicId() : null,
+                task.getCustomerJtbd() != null ? task.getCustomerJtbd().getJtbdType().getName() : null,
+                task.getCustomerJtbd() != null ? task.getCustomerJtbd().getCurrentStage().getStageName() : null,
+                task.getCustomerJtbd() != null ? task.getCustomerJtbd().getStatus().name() : null,
+                task.getIssueType(),
+                task.getLob(),
+                task.getClaimId(),
+                task.getPolicyId(),
+                task.getStatus(),
+                task.getPriority(),
+                task.getSourceChannel(),
+                task.getAssignedQueue(),
+                task.getAssignedAgent(),
+                task.getCreatedAt(),
+                task.getUpdatedAt());
     }
 
-    public List<Ticket> findOpenTicketsForCustomer(String customerId) {
-        return ticketRepository.findByCustomerIdAndStatusInOrderByCreatedAtDesc(
+    public List<Task> findOpenTasksForCustomer(String customerId) {
+        return taskRepository.findByCustomerIdAndStatusInOrderByCreatedAtDesc(
                 customerId, OPEN_LIKE);
     }
 }

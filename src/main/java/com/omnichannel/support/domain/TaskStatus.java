@@ -1,6 +1,6 @@
 package com.omnichannel.support.domain;
 
-public enum TicketStatus {
+public enum TaskStatus {
     OPEN,
     ASSIGNED,
     PENDING_CUSTOMER,

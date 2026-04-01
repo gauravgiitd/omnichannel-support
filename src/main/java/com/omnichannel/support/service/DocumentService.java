@@ -4,10 +4,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.omnichannel.support.domain.ChannelType;
-import com.omnichannel.support.domain.Ticket;
-import com.omnichannel.support.domain.TicketDocument;
+import com.omnichannel.support.domain.Task;
+import com.omnichannel.support.domain.TaskDocument;
 import com.omnichannel.support.dto.DocumentDto;
-import com.omnichannel.support.repo.TicketDocumentRepository;
+import com.omnichannel.support.repo.TaskDocumentRepository;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,21 +21,21 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class DocumentService {
 
-    private final TicketDocumentRepository ticketDocumentRepository;
+    private final TaskDocumentRepository taskDocumentRepository;
     private final ObjectMapper objectMapper;
     private final AuditService auditService;
     private final GoogleDriveStorageService googleDriveStorageService;
 
     @Transactional(readOnly = true)
-    public List<DocumentDto> listByTicket(Ticket ticket) {
-        return ticketDocumentRepository.findByTicketOrderByCreatedAtAsc(ticket).stream()
+    public List<DocumentDto> listByTask(Task task) {
+        return taskDocumentRepository.findByTaskOrderByCreatedAtAsc(task).stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
     @Transactional
     public DocumentDto register(
-            Ticket ticket,
+            Task task,
             String customerId,
             ChannelType sourceChannel,
             String fileUrl,
@@ -46,10 +46,10 @@ public class DocumentService {
         Map<String, Object> resolvedMetadata = metadata != null ? new HashMap<>(metadata) : new HashMap<>();
         moveDriveFileToCustomerFolder(customerId, resolvedMetadata);
 
-        TicketDocument doc = new TicketDocument();
+        TaskDocument doc = new TaskDocument();
         String publicId = UUID.randomUUID().toString();
         doc.setPublicId(publicId);
-        doc.setTicket(ticket);
+        doc.setTask(task);
         doc.setCustomerId(customerId);
         doc.setClaimId(blankToNull(claimId));
         doc.setPolicyId(blankToNull(policyId));
@@ -57,16 +57,16 @@ public class DocumentService {
         doc.setFileUrl(resolveStoredFileUrl(publicId, fileUrl, resolvedMetadata));
         doc.setSourceChannel(sourceChannel);
         doc.setMetadataJson(toJson(resolvedMetadata));
-        TicketDocument saved = ticketDocumentRepository.save(doc);
+        TaskDocument saved = taskDocumentRepository.save(doc);
 
         auditService.record(
                 "DOCUMENT_REGISTERED",
-                "TicketDocument",
+                "TaskDocument",
                 saved.getPublicId(),
                 "SYSTEM",
                 "document-service",
                 Map.of(
-                        "ticket", ticket.getTicketNumber(),
+                        "task", task.getTaskNumber(),
                         "channel", sourceChannel.name()));
 
         return toDto(saved);
@@ -88,8 +88,8 @@ public class DocumentService {
     }
 
     @Transactional(readOnly = true)
-    public TicketDocument getByPublicId(String publicId) {
-        return ticketDocumentRepository.findByPublicId(publicId)
+    public TaskDocument getByPublicId(String publicId) {
+        return taskDocumentRepository.findByPublicId(publicId)
                 .orElseThrow(() -> new com.omnichannel.support.error.NotFoundException("document not found"));
     }
 
@@ -107,10 +107,10 @@ public class DocumentService {
         return fileUrl;
     }
 
-    private DocumentDto toDto(TicketDocument doc) {
+    private DocumentDto toDto(TaskDocument doc) {
         return new DocumentDto(
                 doc.getPublicId(),
-                doc.getTicket().getTicketNumber(),
+                doc.getTask().getTaskNumber(),
                 doc.getCustomerId(),
                 doc.getClaimId(),
                 doc.getPolicyId(),

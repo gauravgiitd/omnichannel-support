@@ -6,7 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record MergeTicketsRequest(
-        @NotBlank @Size(max = 32) String primaryTicketNumber,
-        @NotBlank @Size(max = 32) String mergedTicketNumber,
+public record MergeTasksRequest(
+        @NotBlank @Size(max = 32) String primaryTaskNumber,
+        @NotBlank @Size(max = 32) String mergedTaskNumber,
         @Size(max = 256) String mergedByActor) {}

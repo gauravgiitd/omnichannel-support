@@ -15,22 +15,22 @@ import lombok.Getter;
 import lombok.Setter;
 
 @Entity
-@Table(name = "ticket_merge_map")
+@Table(name = "task_merge_map")
 @Getter
 @Setter
-public class TicketMergeMap {
+public class TaskMergeMap {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "primary_ticket_id", nullable = false)
-    private Ticket primaryTicket;
+    @JoinColumn(name = "primary_task_id", nullable = false)
+    private Task primaryTask;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "merged_ticket_id", nullable = false)
-    private Ticket mergedTicket;
+    @JoinColumn(name = "merged_task_id", nullable = false)
+    private Task mergedTask;
 
     @Column(name = "merged_at", nullable = false)
     private Instant mergedAt;

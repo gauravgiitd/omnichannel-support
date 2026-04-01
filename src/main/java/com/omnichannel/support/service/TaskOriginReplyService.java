@@ -6,7 +6,7 @@ import com.omnichannel.support.domain.CustomerIdentityLink;
 import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.Message;
 import com.omnichannel.support.domain.SenderType;
-import com.omnichannel.support.domain.Ticket;
+import com.omnichannel.support.domain.Task;
 import com.omnichannel.support.dto.DocumentDto;
 import com.omnichannel.support.error.ValidationException;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
@@ -27,7 +27,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class TicketOriginReplyService {
+public class TaskOriginReplyService {
 
     private final SupportPlatformProperties properties;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
@@ -37,20 +37,20 @@ public class TicketOriginReplyService {
     private final GoogleDriveStorageService googleDriveStorageService;
     private final AuditService auditService;
 
-    public DeliveryDebug debugTicketRouting(Ticket ticket) {
-        List<CustomerIdentityLink> identityLinks = customerIdentityLinkRepository.findByCustomerId(ticket.getCustomerId());
-        List<Message> timeline = messageRepository.findByTicketOrderByCreatedAtAsc(ticket);
+    public DeliveryDebug debugTaskRouting(Task task) {
+        List<CustomerIdentityLink> identityLinks = customerIdentityLinkRepository.findByCustomerId(task.getCustomerId());
+        List<Message> timeline = messageRepository.findByTaskOrderByCreatedAtAsc(task);
 
-        Optional<String> threadEmail = findThreadRecipient(ticket, ChannelType.EMAIL);
-        Optional<String> threadWhatsApp = findThreadRecipient(ticket, ChannelType.WHATSAPP);
-        Optional<String> customerEmail = findIdentifier(ticket.getCustomerId(), IdentifierType.EMAIL);
-        Optional<String> customerPhone = findIdentifier(ticket.getCustomerId(), IdentifierType.PHONE);
-        Optional<String> resolvedRecipient = resolveOriginRecipient(ticket, ticket.getSourceChannel());
+        Optional<String> threadEmail = findThreadRecipient(task, ChannelType.EMAIL);
+        Optional<String> threadWhatsApp = findThreadRecipient(task, ChannelType.WHATSAPP);
+        Optional<String> customerEmail = findIdentifier(task.getCustomerId(), IdentifierType.EMAIL);
+        Optional<String> customerPhone = findIdentifier(task.getCustomerId(), IdentifierType.PHONE);
+        Optional<String> resolvedRecipient = resolveOriginRecipient(task, task.getSourceChannel());
 
         return new DeliveryDebug(
-                ticket.getTicketNumber(),
-                ticket.getCustomerId(),
-                ticket.getSourceChannel(),
+                task.getTaskNumber(),
+                task.getCustomerId(),
+                task.getSourceChannel(),
                 identityLinks.stream()
                         .map(link -> new IdentityLinkDebug(
                                 link.getIdentifierType().name(),
@@ -72,33 +72,33 @@ public class TicketOriginReplyService {
                 resolvedRecipient.orElse(null));
     }
 
-    public OutboundDeliveryResult deliverAgentReply(Ticket ticket, String agentEmail, String body) {
-        return switch (ticket.getSourceChannel()) {
-            case EMAIL -> sendEmailReply(ticket, agentEmail, body);
-            case WHATSAPP -> sendWhatsAppReply(ticket, agentEmail, body);
+    public OutboundDeliveryResult deliverAgentReply(Task task, String agentEmail, String body) {
+        return switch (task.getSourceChannel()) {
+            case EMAIL -> sendEmailReply(task, agentEmail, body);
+            case WHATSAPP -> sendWhatsAppReply(task, agentEmail, body);
             case UI -> new OutboundDeliveryResult(ChannelType.UI, null, null, Map.of("delivery", "app_only"));
         };
     }
 
-    private OutboundDeliveryResult sendEmailReply(Ticket ticket, String agentEmail, String body) {
-        String recipient = resolveOriginRecipient(ticket, ChannelType.EMAIL)
-                .orElseThrow(() -> new ValidationException("customer email not found for ticket origin"));
+    private OutboundDeliveryResult sendEmailReply(Task task, String agentEmail, String body) {
+        String recipient = resolveOriginRecipient(task, ChannelType.EMAIL)
+                .orElseThrow(() -> new ValidationException("customer email not found for task origin"));
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
         if (mailSender == null) {
             throw new ValidationException("mail sender not configured");
         }
 
-        String subject = "[" + ticket.getTicketNumber() + "] Support update";
-        String ticketUrl = customerTicketUrl(ticket.getTicketNumber());
+        String subject = "Support update on your request";
+        String requestUrl = customerRequestUrl(task);
         String messageBody = """
-                Support update for ticket %s
+                Support update for your request
 
                 %s
 
-                You can continue the conversation by replying to this email or by opening your ticket here:
+                You can continue the conversation by replying to this email or by opening your request here:
                 %s
-                """.formatted(ticket.getTicketNumber(), body, ticketUrl);
-        String messageId = buildOutboundMessageId(ticket.getTicketNumber(), properties.outboundEmail().fromAddress());
+                """.formatted(body, requestUrl);
+        String messageId = buildOutboundMessageId(task.getTaskNumber(), properties.outboundEmail().fromAddress());
         try {
             jakarta.mail.internet.MimeMessage mimeMessage = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, false, StandardCharsets.UTF_8.name());
@@ -114,14 +114,14 @@ public class TicketOriginReplyService {
             metadata.put("delivery", "email");
             metadata.put("recipient", recipient);
             metadata.put("email_subject", subject);
-            metadata.put("customer_ticket_url", ticketUrl);
+            metadata.put("customer_request_url", requestUrl);
             metadata.put("agent_email", agentEmail);
             return new OutboundDeliveryResult(ChannelType.EMAIL, recipient, stripAngles(messageId), metadata);
         } catch (Exception ex) {
             auditService.record(
                     "AGENT_REPLY_EMAIL_FAILED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "AGENT",
                     agentEmail,
                     Map.of("recipient", recipient, "error", safeMessage(ex)));
@@ -129,9 +129,9 @@ public class TicketOriginReplyService {
         }
     }
 
-    private OutboundDeliveryResult sendWhatsAppReply(Ticket ticket, String agentEmail, String body) {
-        String recipient = resolveOriginRecipient(ticket, ChannelType.WHATSAPP)
-                .orElseThrow(() -> new ValidationException("customer phone not found for ticket origin"));
+    private OutboundDeliveryResult sendWhatsAppReply(Task task, String agentEmail, String body) {
+        String recipient = resolveOriginRecipient(task, ChannelType.WHATSAPP)
+                .orElseThrow(() -> new ValidationException("customer phone not found for task origin"));
         if (!metaWhatsAppCloudApiClient.canSendMessages()) {
             throw new ValidationException("WhatsApp Cloud API outbound messaging is not configured");
         }
@@ -145,8 +145,8 @@ public class TicketOriginReplyService {
         } catch (Exception ex) {
             auditService.record(
                     "AGENT_REPLY_WHATSAPP_FAILED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "AGENT",
                     agentEmail,
                     Map.of("recipient", recipient, "error", safeMessage(ex)));
@@ -155,36 +155,39 @@ public class TicketOriginReplyService {
     }
 
     public OutboundDeliveryResult deliverAgentDocument(
-            Ticket ticket, String agentEmail, DocumentDto document, String messageBody) {
-        return switch (ticket.getSourceChannel()) {
-            case EMAIL -> sendEmailAttachment(ticket, agentEmail, document, messageBody);
-            case WHATSAPP -> sendWhatsAppAttachment(ticket, agentEmail, document, messageBody);
+            Task task, String agentEmail, DocumentDto document, String messageBody) {
+        return switch (task.getSourceChannel()) {
+            case EMAIL -> sendEmailAttachment(task, agentEmail, document, messageBody);
+            case WHATSAPP -> sendWhatsAppAttachment(task, agentEmail, document, messageBody);
             case UI -> new OutboundDeliveryResult(ChannelType.UI, null, null, Map.of("delivery", "app_only_attachment"));
         };
     }
 
-    private String customerTicketUrl(String ticketNumber) {
+    private String customerRequestUrl(Task task) {
         String baseUrl = properties.app() != null ? properties.app().baseUrl() : null;
         String normalizedBase = (baseUrl == null || baseUrl.isBlank())
                 ? "http://localhost:8080"
                 : baseUrl.replaceAll("/+$", "");
-        return normalizedBase + "/customer?ticket=" + ticketNumber;
+        String requestId = task.getCustomerJtbd() != null
+                ? CustomerRequestIds.forJtbd(task.getCustomerJtbd())
+                : CustomerRequestIds.forTask(task);
+        return normalizedBase + "/customer?request=" + requestId;
     }
 
-    private Optional<String> resolveOriginRecipient(Ticket ticket, ChannelType channelType) {
-        Optional<String> threadRecipient = findThreadRecipient(ticket, channelType);
+    private Optional<String> resolveOriginRecipient(Task task, ChannelType channelType) {
+        Optional<String> threadRecipient = findThreadRecipient(task, channelType);
         if (threadRecipient.isPresent()) {
             return threadRecipient;
         }
         return switch (channelType) {
-            case EMAIL -> findIdentifier(ticket.getCustomerId(), IdentifierType.EMAIL);
-            case WHATSAPP -> findIdentifier(ticket.getCustomerId(), IdentifierType.PHONE);
+            case EMAIL -> findIdentifier(task.getCustomerId(), IdentifierType.EMAIL);
+            case WHATSAPP -> findIdentifier(task.getCustomerId(), IdentifierType.PHONE);
             case UI -> Optional.empty();
         };
     }
 
-    private Optional<String> findThreadRecipient(Ticket ticket, ChannelType channelType) {
-        List<Message> timeline = messageRepository.findByTicketOrderByCreatedAtAsc(ticket);
+    private Optional<String> findThreadRecipient(Task task, ChannelType channelType) {
+        List<Message> timeline = messageRepository.findByTaskOrderByCreatedAtAsc(task);
         for (int index = timeline.size() - 1; index >= 0; index -= 1) {
             Message message = timeline.get(index);
             if (message.getSenderType() != SenderType.CUSTOMER) {
@@ -208,9 +211,9 @@ public class TicketOriginReplyService {
     }
 
     private OutboundDeliveryResult sendEmailAttachment(
-            Ticket ticket, String agentEmail, DocumentDto document, String messageBody) {
-        String recipient = resolveOriginRecipient(ticket, ChannelType.EMAIL)
-                .orElseThrow(() -> new ValidationException("customer email not found for ticket origin"));
+            Task task, String agentEmail, DocumentDto document, String messageBody) {
+        String recipient = resolveOriginRecipient(task, ChannelType.EMAIL)
+                .orElseThrow(() -> new ValidationException("customer email not found for task origin"));
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
         if (mailSender == null) {
             throw new ValidationException("mail sender not configured");
@@ -218,12 +221,12 @@ public class TicketOriginReplyService {
         byte[] bytes = loadDriveBytes(document);
         String fileName = fileName(document);
         String mimeType = mimeType(document);
-        String subject = "[" + ticket.getTicketNumber() + "] Support attachment";
+        String subject = "[" + task.getTaskNumber() + "] Support attachment";
         String body = hasText(messageBody)
                 ? messageBody
-                : "A supporting document has been added to your support ticket.";
-        String ticketUrl = customerTicketUrl(ticket.getTicketNumber());
-        String messageId = buildOutboundMessageId(ticket.getTicketNumber(), properties.outboundEmail().fromAddress());
+                : "A supporting document has been added to your request.";
+        String requestUrl = customerRequestUrl(task);
+        String messageId = buildOutboundMessageId(task.getTaskNumber(), properties.outboundEmail().fromAddress());
         try {
             jakarta.mail.internet.MimeMessage mimeMessage = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, StandardCharsets.UTF_8.name());
@@ -231,7 +234,7 @@ public class TicketOriginReplyService {
             helper.setFrom(properties.outboundEmail().fromAddress(), properties.outboundEmail().fromDisplayName());
             helper.setReplyTo(properties.outboundEmail().fromAddress());
             helper.setSubject(subject);
-            helper.setText(body + "\n\nOpen your ticket here:\n" + ticketUrl, false);
+            helper.setText(body + "\n\nOpen your request here:\n" + requestUrl, false);
             helper.addAttachment(fileName, new ByteArrayResource(bytes), mimeType);
             mimeMessage.setHeader("Message-ID", messageId);
             mailSender.send(mimeMessage);
@@ -246,8 +249,8 @@ public class TicketOriginReplyService {
         } catch (Exception ex) {
             auditService.record(
                     "AGENT_ATTACHMENT_EMAIL_FAILED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "AGENT",
                     agentEmail,
                     Map.of("recipient", recipient, "error", safeMessage(ex), "document_id", document.documentId()));
@@ -256,9 +259,9 @@ public class TicketOriginReplyService {
     }
 
     private OutboundDeliveryResult sendWhatsAppAttachment(
-            Ticket ticket, String agentEmail, DocumentDto document, String messageBody) {
-        String recipient = resolveOriginRecipient(ticket, ChannelType.WHATSAPP)
-                .orElseThrow(() -> new ValidationException("customer phone not found for ticket origin"));
+            Task task, String agentEmail, DocumentDto document, String messageBody) {
+        String recipient = resolveOriginRecipient(task, ChannelType.WHATSAPP)
+                .orElseThrow(() -> new ValidationException("customer phone not found for task origin"));
         if (!metaWhatsAppCloudApiClient.canSendMessages()) {
             throw new ValidationException("WhatsApp Cloud API outbound messaging is not configured");
         }
@@ -278,8 +281,8 @@ public class TicketOriginReplyService {
         } catch (Exception ex) {
             auditService.record(
                     "AGENT_ATTACHMENT_WHATSAPP_FAILED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "AGENT",
                     agentEmail,
                     Map.of("recipient", recipient, "error", safeMessage(ex), "document_id", document.documentId()));
@@ -317,13 +320,13 @@ public class TicketOriginReplyService {
         return value != null && !value.isBlank();
     }
 
-    private static String buildOutboundMessageId(String ticketNumber, String fromAddress) {
+    private static String buildOutboundMessageId(String taskNumber, String fromAddress) {
         String domain = "support.local";
         int at = fromAddress != null ? fromAddress.indexOf('@') : -1;
         if (at >= 0 && at < fromAddress.length() - 1) {
             domain = fromAddress.substring(at + 1).trim();
         }
-        return "<agent-" + ticketNumber.toLowerCase() + "-" + UUID.randomUUID() + "@" + domain + ">";
+        return "<agent-" + taskNumber.toLowerCase() + "-" + UUID.randomUUID() + "@" + domain + ">";
     }
 
     private static String stripAngles(String messageId) {
@@ -344,7 +347,7 @@ public class TicketOriginReplyService {
             ChannelType channel, String recipient, String externalThreadRef, Map<String, Object> metadata) {}
 
     public record DeliveryDebug(
-            String ticketId,
+            String taskId,
             String customerId,
             ChannelType sourceChannel,
             List<IdentityLinkDebug> identityLinks,

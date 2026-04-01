@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.omnichannel.support.domain.ChannelType;
 import com.omnichannel.support.domain.Message;
 import com.omnichannel.support.domain.SenderType;
-import com.omnichannel.support.domain.Ticket;
+import com.omnichannel.support.domain.Task;
 import com.omnichannel.support.dto.MessageDto;
 import com.omnichannel.support.repo.MessageRepository;
 import java.util.Collections;
@@ -27,15 +27,15 @@ public class ConversationService {
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
-    public List<MessageDto> listTimeline(Ticket ticket) {
-        return messageRepository.findByTicketOrderByCreatedAtAsc(ticket).stream()
+    public List<MessageDto> listTimeline(Task task) {
+        return messageRepository.findByTaskOrderByCreatedAtAsc(task).stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
     @Transactional
     public MessageDto appendMessage(
-            Ticket ticket,
+            Task task,
             ChannelType channel,
             SenderType senderType,
             String senderIdentifier,
@@ -45,7 +45,7 @@ public class ConversationService {
             Map<String, Object> metadata) {
         Message message = new Message();
         message.setPublicId(UUID.randomUUID().toString());
-        message.setTicket(ticket);
+        message.setTask(task);
         message.setChannel(channel);
         message.setSenderType(senderType);
         message.setSenderIdentifier(senderIdentifier);
@@ -59,11 +59,11 @@ public class ConversationService {
 
     @Transactional
     public void enrichLatestMessageWithInboundFiles(
-            Ticket ticket, List<String> fileUrls, List<String> attachmentIds) {
+            Task task, List<String> fileUrls, List<String> attachmentIds) {
         if ((fileUrls == null || fileUrls.isEmpty()) && (attachmentIds == null || attachmentIds.isEmpty())) {
             return;
         }
-        List<Message> messages = messageRepository.findByTicketOrderByCreatedAtAsc(ticket);
+        List<Message> messages = messageRepository.findByTaskOrderByCreatedAtAsc(task);
         if (messages.isEmpty()) {
             return;
         }
@@ -83,7 +83,7 @@ public class ConversationService {
         java.util.Map<String, Object> meta = parseObjectMap(message.getMetadataJson());
         return new MessageDto(
                 message.getPublicId(),
-                message.getTicket().getTicketNumber(),
+                message.getTask().getTaskNumber(),
                 message.getChannel(),
                 message.getSenderType(),
                 message.getSenderIdentifier(),

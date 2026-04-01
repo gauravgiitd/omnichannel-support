@@ -4,10 +4,10 @@ import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 @Component
-public class TicketNumberGenerator {
+public class TaskNumberGenerator {
 
-    public String newTicketNumber() {
+    public String newTaskNumber() {
         String compact = UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
-        return "TKT-" + compact;
+        return "TSK-" + compact;
     }
 }

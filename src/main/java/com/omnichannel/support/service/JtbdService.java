@@ -8,8 +8,8 @@ import com.omnichannel.support.domain.JtbdInstanceStatus;
 import com.omnichannel.support.domain.JtbdType;
 import com.omnichannel.support.domain.JtbdTypeStage;
 import com.omnichannel.support.domain.SenderType;
-import com.omnichannel.support.domain.Ticket;
-import com.omnichannel.support.domain.TicketStatus;
+import com.omnichannel.support.domain.Task;
+import com.omnichannel.support.domain.TaskStatus;
 import com.omnichannel.support.dto.CreateCustomerJtbdRequest;
 import com.omnichannel.support.dto.CustomerJtbdDto;
 import com.omnichannel.support.dto.CustomerSummaryDto;
@@ -23,7 +23,7 @@ import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import com.omnichannel.support.repo.CustomerJtbdRepository;
 import com.omnichannel.support.repo.JtbdTypeRepository;
 import com.omnichannel.support.repo.JtbdTypeStageRepository;
-import com.omnichannel.support.repo.TicketRepository;
+import com.omnichannel.support.repo.TaskRepository;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
@@ -42,19 +42,21 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class JtbdService {
 
-    private static final Set<TicketStatus> OPEN_LIKE =
+    private static final String GENERAL_SUPPORT_TYPE_NAME = "General support request";
+
+    private static final Set<TaskStatus> OPEN_LIKE =
             EnumSet.of(
-                    TicketStatus.OPEN,
-                    TicketStatus.ASSIGNED,
-                    TicketStatus.PENDING_CUSTOMER,
-                    TicketStatus.PENDING_INTERNAL,
-                    TicketStatus.REOPENED);
+                    TaskStatus.OPEN,
+                    TaskStatus.ASSIGNED,
+                    TaskStatus.PENDING_CUSTOMER,
+                    TaskStatus.PENDING_INTERNAL,
+                    TaskStatus.REOPENED);
 
     private final JtbdTypeRepository jtbdTypeRepository;
     private final JtbdTypeStageRepository jtbdTypeStageRepository;
     private final CustomerJtbdRepository customerJtbdRepository;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
-    private final TicketRepository ticketRepository;
+    private final TaskRepository taskRepository;
     private final CustomerChannelNotificationService customerChannelNotificationService;
     private final ConversationService conversationService;
     private final CustomerConversationContextService customerConversationContextService;
@@ -116,9 +118,9 @@ public class JtbdService {
             }
         });
 
-        ticketRepository.findAll().forEach(ticket -> {
-            CustomerAccumulator acc = customers.computeIfAbsent(ticket.getCustomerId(), CustomerAccumulator::new);
-            acc.ticketCount += 1;
+        taskRepository.findAll().forEach(task -> {
+            CustomerAccumulator acc = customers.computeIfAbsent(task.getCustomerId(), CustomerAccumulator::new);
+            acc.taskCount += 1;
         });
 
         customerJtbdRepository.findAll().forEach(instance -> {
@@ -174,6 +176,22 @@ public class JtbdService {
     }
 
     @Transactional
+    public CustomerJtbd createGeneralSupportJtbd(String customerId) {
+        JtbdType type = ensureGeneralSupportType();
+        List<JtbdTypeStage> stages = jtbdTypeStageRepository.findByJtbdTypeOrderByStageOrderAsc(type);
+        if (stages.isEmpty()) {
+            throw new ValidationException("general support JTBD type has no stages configured");
+        }
+        CustomerJtbd instance = new CustomerJtbd();
+        instance.setPublicId(UUID.randomUUID().toString());
+        instance.setCustomerId(customerId.trim());
+        instance.setJtbdType(type);
+        instance.setCurrentStage(stages.get(0));
+        instance.setStatus(stages.get(0).isTerminalCompleted() ? JtbdInstanceStatus.COMPLETED : JtbdInstanceStatus.ACTIVE);
+        return customerJtbdRepository.save(instance);
+    }
+
+    @Transactional
     public CustomerJtbdDto updateCustomerJtbd(String publicId, UpdateCustomerJtbdRequest request) {
         CustomerJtbd instance = loadCustomerJtbd(publicId);
         JtbdTypeStage stage = resolveStage(instance.getJtbdType(), request.stageKey())
@@ -183,7 +201,7 @@ public class JtbdService {
         instance.setStatus(stage.isTerminalCompleted() ? JtbdInstanceStatus.COMPLETED : JtbdInstanceStatus.ACTIVE);
         customerJtbdRepository.save(instance);
         if (completingNow) {
-            closeTicketsForCompletedJtbd(instance);
+            closeTasksForCompletedJtbd(instance);
         }
         return toCustomerJtbdDto(instance);
     }
@@ -191,11 +209,11 @@ public class JtbdService {
     @Transactional
     public void deleteCustomerJtbd(String publicId) {
         CustomerJtbd instance = loadCustomerJtbd(publicId);
-        boolean hasTickets = ticketRepository.findAll().stream()
-                .anyMatch(ticket -> ticket.getCustomerJtbd() != null
-                        && ticket.getCustomerJtbd().getId().equals(instance.getId()));
-        if (hasTickets) {
-            throw new ValidationException("cannot delete a customer JTBD that already has linked tickets");
+        boolean hasTasks = taskRepository.findAll().stream()
+                .anyMatch(task -> task.getCustomerJtbd() != null
+                        && task.getCustomerJtbd().getId().equals(instance.getId()));
+        if (hasTasks) {
+            throw new ValidationException("cannot delete a customer JTBD that already has linked tasks");
         }
         customerJtbdRepository.delete(instance);
     }
@@ -206,22 +224,22 @@ public class JtbdService {
                 .orElseThrow(() -> new NotFoundException("customer JTBD not found"));
     }
 
-    private void closeTicketsForCompletedJtbd(CustomerJtbd instance) {
-        List<Ticket> tickets = ticketRepository.findByCustomerJtbdIdAndStatusInOrderByCreatedAtDesc(instance.getId(), OPEN_LIKE);
-        for (Ticket ticket : tickets) {
-            ticket.setStatus(TicketStatus.CLOSED);
-            ticketRepository.save(ticket);
-            customerConversationContextService.clearTicketReferences(ticket.getTicketNumber());
-            notifyCompletion(ticket, instance);
+    private void closeTasksForCompletedJtbd(CustomerJtbd instance) {
+        List<Task> tasks = taskRepository.findByCustomerJtbdIdAndStatusInOrderByCreatedAtDesc(instance.getId(), OPEN_LIKE);
+        for (Task task : tasks) {
+            task.setStatus(TaskStatus.CLOSED);
+            taskRepository.save(task);
+            customerConversationContextService.clearTaskReferences(task.getTaskNumber());
+            notifyCompletion(task, instance);
         }
     }
 
-    private void notifyCompletion(Ticket ticket, CustomerJtbd instance) {
-        String body = "The job \"" + instance.getJtbdType().getName() + "\" is complete. Ticket "
-                + ticket.getTicketNumber() + " is now closed.";
-        String recipient = switch (ticket.getSourceChannel()) {
-            case EMAIL -> latestIdentifier(ticket.getCustomerId(), IdentifierType.EMAIL);
-            case WHATSAPP -> latestIdentifier(ticket.getCustomerId(), IdentifierType.PHONE);
+    private void notifyCompletion(Task task, CustomerJtbd instance) {
+        String body = "Your request \"" + instance.getJtbdType().getName() + "\" is complete. "
+                + "We have closed the related internal work item and no further action is needed from you right now.";
+        String recipient = switch (task.getSourceChannel()) {
+            case EMAIL -> latestIdentifier(task.getCustomerId(), IdentifierType.EMAIL);
+            case WHATSAPP -> latestIdentifier(task.getCustomerId(), IdentifierType.PHONE);
             case UI -> null;
         };
 
@@ -230,11 +248,11 @@ public class JtbdService {
         metadata.put("jtbd_public_id", instance.getPublicId());
         metadata.put("jtbd_stage", instance.getCurrentStage().getStageKey());
 
-        if (ticket.getSourceChannel() != ChannelType.UI && recipient != null) {
+        if (task.getSourceChannel() != ChannelType.UI && recipient != null) {
             try {
-                String subject = "[" + ticket.getTicketNumber() + "] JTBD completed";
+                String subject = "[" + instance.getJtbdType().getName() + "] Request completed";
                 CustomerChannelNotificationService.DirectDeliveryResult delivery =
-                        customerChannelNotificationService.send(ticket.getSourceChannel(), recipient, subject, body);
+                        customerChannelNotificationService.send(task.getSourceChannel(), recipient, subject, body);
                 externalThreadRef = delivery.externalThreadRef();
                 metadata.putAll(delivery.metadata());
                 metadata.put("delivery_status", "sent");
@@ -247,8 +265,8 @@ public class JtbdService {
         }
 
         conversationService.appendMessage(
-                ticket,
-                ticket.getSourceChannel(),
+                task,
+                task.getSourceChannel(),
                 SenderType.SYSTEM,
                 "jtbd-system",
                 body,
@@ -264,6 +282,44 @@ public class JtbdService {
                 .map(CustomerIdentityLink::getIdentifierValue)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private JtbdType ensureGeneralSupportType() {
+        Optional<JtbdType> existing = jtbdTypeRepository.findByName(GENERAL_SUPPORT_TYPE_NAME);
+        if (existing.isPresent()) {
+            JtbdType type = existing.get();
+            List<JtbdTypeStage> stages = jtbdTypeStageRepository.findByJtbdTypeOrderByStageOrderAsc(type);
+            if (!stages.isEmpty()) {
+                return type;
+            }
+        }
+
+        JtbdType type = existing.orElseGet(JtbdType::new);
+        if (type.getPublicId() == null || type.getPublicId().isBlank()) {
+            type.setPublicId(UUID.randomUUID().toString());
+        }
+        type.setName(GENERAL_SUPPORT_TYPE_NAME);
+        type.setDescription("Default customer-visible request used when a new request starts without a more specific JTBD type.");
+        jtbdTypeRepository.save(type);
+
+        if (jtbdTypeStageRepository.findByJtbdTypeOrderByStageOrderAsc(type).isEmpty()) {
+            JtbdTypeStage openStage = new JtbdTypeStage();
+            openStage.setJtbdType(type);
+            openStage.setStageKey("open");
+            openStage.setStageName("Open");
+            openStage.setStageOrder(1);
+            openStage.setTerminalCompleted(false);
+
+            JtbdTypeStage completedStage = new JtbdTypeStage();
+            completedStage.setJtbdType(type);
+            completedStage.setStageKey("completed");
+            completedStage.setStageName("Completed");
+            completedStage.setStageOrder(2);
+            completedStage.setTerminalCompleted(true);
+
+            jtbdTypeStageRepository.saveAll(List.of(openStage, completedStage));
+        }
+        return type;
     }
 
     private void validateStages(List<UpsertJtbdTypeRequest.StageRequest> stages) {
@@ -364,7 +420,7 @@ public class JtbdService {
         private final String customerId;
         private final List<String> emails = new ArrayList<>();
         private final List<String> phones = new ArrayList<>();
-        private long ticketCount;
+        private long taskCount;
         private long activeJtbdCount;
 
         private CustomerAccumulator(String customerId) {
@@ -376,7 +432,7 @@ public class JtbdService {
         }
 
         private CustomerSummaryDto toDto() {
-            return new CustomerSummaryDto(customerId, emails, phones, ticketCount, activeJtbdCount);
+            return new CustomerSummaryDto(customerId, emails, phones, taskCount, activeJtbdCount);
         }
     }
 }

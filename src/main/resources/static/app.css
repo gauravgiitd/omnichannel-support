@@ -100,7 +100,7 @@ label {
 .surface,
 .panel,
 .subpanel,
-.ticket-card,
+.task-card,
 .document-card,
 .event-card,
 .chat-bubble {
@@ -183,7 +183,7 @@ label {
 .panel-head,
 .subpanel-head,
 .actions-inline,
-.ticket-meta,
+.task-meta,
 .filter-inline,
 .customer-chip,
 .form-footer,
@@ -318,7 +318,7 @@ label {
     min-width: 240px;
 }
 
-.ticket-jtbd-strip {
+.task-jtbd-strip {
     margin: 8px 0 16px;
     padding: 12px 14px;
     border-radius: 16px;
@@ -334,18 +334,18 @@ label {
     gap: 12px;
 }
 
-.ticket-card {
+.task-card {
     padding: 14px;
     cursor: pointer;
     transition: transform 150ms ease, border-color 150ms ease;
 }
 
-.customer-ticket-card {
+.customer-task-card {
     padding: 0;
     overflow: hidden;
 }
 
-.customer-ticket-header {
+.customer-task-header {
     width: 100%;
     display: flex;
     align-items: flex-start;
@@ -358,25 +358,25 @@ label {
     text-align: left;
 }
 
-.customer-ticket-header:hover {
+.customer-task-header:hover {
     transform: none;
     background: rgba(255, 255, 255, 0.18);
 }
 
-.customer-ticket-summary {
+.customer-task-summary {
     display: grid;
     gap: 8px;
     min-width: 0;
 }
 
-.customer-ticket-chevron {
+.customer-task-chevron {
     flex: 0 0 auto;
     align-self: center;
     color: var(--accent-strong);
     font-weight: 700;
 }
 
-.customer-ticket-body {
+.customer-task-body {
     display: grid;
     gap: 16px;
     padding: 0 18px 18px;
@@ -384,14 +384,14 @@ label {
     background: rgba(255, 255, 255, 0.28);
 }
 
-.customer-ticket-details {
+.customer-task-details {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     padding-top: 16px;
 }
 
-.customer-ticket-chat {
+.customer-task-chat {
     min-height: 180px;
 }
 
@@ -402,14 +402,14 @@ label {
     background: rgba(255, 255, 255, 0.72);
 }
 
-.ticket-card:hover,
-.ticket-card.active {
+.task-card:hover,
+.task-card.active {
     transform: translateY(-2px);
     border-color: rgba(14, 111, 98, 0.35);
 }
 
-.ticket-supporting,
-.ticket-card p {
+.task-supporting,
+.task-card p {
     margin: 0.55rem 0 0;
     color: var(--muted);
 }
@@ -581,7 +581,7 @@ label {
     border-top: 1px solid var(--line);
 }
 
-.ticket-list-shell {
+.task-list-shell {
     margin-bottom: 16px;
 }
 

@@ -5,7 +5,7 @@ import com.omnichannel.support.domain.ChannelType;
 import com.omnichannel.support.domain.CustomerIdentityLink;
 import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.SenderType;
-import com.omnichannel.support.domain.Ticket;
+import com.omnichannel.support.domain.Task;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import com.omnichannel.support.error.ValidationException;
 import java.nio.charset.StandardCharsets;
@@ -20,7 +20,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class TicketEmailNotificationService {
+public class TaskEmailNotificationService {
 
     private final ObjectProvider<JavaMailSender> mailSenderProvider;
     private final SupportPlatformProperties properties;
@@ -29,22 +29,22 @@ public class TicketEmailNotificationService {
     private final AuditService auditService;
     private final MetaWhatsAppCloudApiClient metaWhatsAppCloudApiClient;
 
-    public void sendTicketCreatedNotifications(Ticket ticket) {
-        if (ticket.getSourceChannel() == ChannelType.WHATSAPP) {
-            sendTicketCreatedWhatsApp(ticket);
+    public void sendTaskCreatedNotifications(Task task) {
+        if (task.getSourceChannel() == ChannelType.WHATSAPP) {
+            sendTaskCreatedWhatsApp(task);
         }
-        sendTicketCreatedEmail(ticket);
+        sendTaskCreatedEmail(task);
     }
 
-    public void sendTicketCreatedEmail(Ticket ticket) {
-        Optional<String> emailOpt = findCustomerEmail(ticket.getCustomerId());
+    public void sendTaskCreatedEmail(Task task) {
+        Optional<String> emailOpt = findCustomerEmail(task.getCustomerId());
         if (emailOpt.isEmpty()) {
             auditService.record(
                     "TICKET_EMAIL_SKIPPED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "SYSTEM",
-                    "ticket-email",
+                    "task-email",
                     Map.of("reason", "customer email not found"));
             return;
         }
@@ -53,28 +53,28 @@ public class TicketEmailNotificationService {
         if (mailSender == null) {
             auditService.record(
                     "TICKET_EMAIL_SKIPPED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "SYSTEM",
-                    "ticket-email",
+                    "task-email",
                     Map.of("reason", "mail sender not configured"));
             return;
         }
 
         String toAddress = emailOpt.get();
-        String subject = "[" + ticket.getTicketNumber() + "] Your support ticket is open";
-        String ticketUrl = customerTicketUrl(ticket.getTicketNumber());
+        String subject = "Your support request is open";
+        String requestUrl = customerRequestUrl(task);
         String body = """
-                Your support ticket is now open.
+                Your support request is now open.
 
-                Ticket number: %s
+                Request: %s
 
-                Open your ticket here:
+                Open your request here:
                 %s
 
-                You can either open the ticket in the customer app using the link above, or reply directly to this email with more context or attach documents. Either way, we will add everything to the same ticket.
-                """.formatted(ticket.getTicketNumber(), ticketUrl);
-        String messageId = buildOutboundMessageId(ticket.getTicketNumber(), properties.outboundEmail().fromAddress());
+                You can either open the request in the customer app using the link above, or reply directly to this email with more context or attach documents. Either way, we will add everything to the same customer journey.
+                """.formatted(customerRequestLabel(task), requestUrl);
+        String messageId = buildOutboundMessageId(task.getTaskNumber(), properties.outboundEmail().fromAddress());
 
         try {
             jakarta.mail.internet.MimeMessage mimeMessage = mailSender.createMimeMessage();
@@ -89,7 +89,7 @@ public class TicketEmailNotificationService {
             mailSender.send(mimeMessage);
 
             conversationService.appendMessage(
-                    ticket,
+                    task,
                     ChannelType.EMAIL,
                     SenderType.SYSTEM,
                     properties.outboundEmail().fromAddress(),
@@ -97,68 +97,68 @@ public class TicketEmailNotificationService {
                     java.util.List.of(),
                     stripAngles(messageId),
                     Map.of(
-                            "direction", "outbound_ticket_created_email",
+                            "direction", "outbound_task_created_email",
                             "email_subject", subject,
                             "recipient", toAddress,
-                            "customer_ticket_url", ticketUrl));
+                            "customer_request_url", requestUrl));
 
             auditService.record(
                     "TICKET_EMAIL_SENT",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "SYSTEM",
-                "ticket-email",
+                "task-email",
                 Map.of("recipient", toAddress, "message_id", stripAngles(messageId)));
         } catch (Exception ex) {
             auditService.record(
                     "TICKET_EMAIL_FAILED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "SYSTEM",
-                    "ticket-email",
+                    "task-email",
                 Map.of("recipient", toAddress, "error", ex.getMessage() != null ? ex.getMessage() : "unknown"));
         }
     }
 
-    public void sendTicketCreatedWhatsApp(Ticket ticket) {
-        Optional<String> phoneOpt = findCustomerPhone(ticket.getCustomerId());
+    public void sendTaskCreatedWhatsApp(Task task) {
+        Optional<String> phoneOpt = findCustomerPhone(task.getCustomerId());
         if (phoneOpt.isEmpty()) {
             auditService.record(
                     "TICKET_WHATSAPP_SKIPPED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "SYSTEM",
-                    "ticket-whatsapp",
+                    "task-whatsapp",
                     Map.of("reason", "customer phone not found"));
             return;
         }
         if (!metaWhatsAppCloudApiClient.canSendMessages()) {
             auditService.record(
                     "TICKET_WHATSAPP_SKIPPED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "SYSTEM",
-                    "ticket-whatsapp",
+                    "task-whatsapp",
                     Map.of("reason", "whatsapp outbound not configured"));
             return;
         }
 
         String recipient = phoneOpt.get();
-        String ticketUrl = customerTicketUrl(ticket.getTicketNumber());
+        String requestUrl = customerRequestUrl(task);
         String body = """
-                Your support ticket is now open.
+                Your support request is now open.
 
-                Ticket number: %s
+                Request: %s
 
-                Open your ticket here:
+                Open your request here:
                 %s
 
-                You can continue the conversation here on WhatsApp or open the ticket in the customer app using the link above. Either way, we will add everything to the same ticket.
-                """.formatted(ticket.getTicketNumber(), ticketUrl);
+                You can continue the conversation here on WhatsApp or open the request in the customer app using the link above. Either way, we will add everything to the same customer journey.
+                """.formatted(customerRequestLabel(task), requestUrl);
         try {
             String messageId = metaWhatsAppCloudApiClient.sendTextMessage(recipient, body);
             conversationService.appendMessage(
-                    ticket,
+                    task,
                     ChannelType.WHATSAPP,
                     SenderType.SYSTEM,
                     properties.systemIdentity() != null ? properties.systemIdentity().agentReplyFromAddress() : "support",
@@ -166,34 +166,47 @@ public class TicketEmailNotificationService {
                     java.util.List.of(),
                     messageId,
                     Map.of(
-                            "direction", "outbound_ticket_created_whatsapp",
+                            "direction", "outbound_task_created_whatsapp",
                             "recipient", recipient,
-                            "customer_ticket_url", ticketUrl));
+                            "customer_request_url", requestUrl));
 
             auditService.record(
                     "TICKET_WHATSAPP_SENT",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "SYSTEM",
-                    "ticket-whatsapp",
+                    "task-whatsapp",
                     Map.of("recipient", recipient, "message_id", messageId != null ? messageId : ""));
         } catch (Exception ex) {
             auditService.record(
                     "TICKET_WHATSAPP_FAILED",
-                    "Ticket",
-                    ticket.getTicketNumber(),
+                    "Task",
+                    task.getTaskNumber(),
                     "SYSTEM",
-                    "ticket-whatsapp",
+                    "task-whatsapp",
                     Map.of("recipient", recipient, "error", ex.getMessage() != null ? ex.getMessage() : "unknown"));
         }
     }
 
-    private String customerTicketUrl(String ticketNumber) {
+    private String customerRequestUrl(Task task) {
         String baseUrl = properties.app() != null ? properties.app().baseUrl() : null;
         String normalizedBase = (baseUrl == null || baseUrl.isBlank())
                 ? "http://localhost:8080"
                 : baseUrl.replaceAll("/+$", "");
-        return normalizedBase + "/customer?ticket=" + ticketNumber;
+        String requestId = task.getCustomerJtbd() != null
+                ? CustomerRequestIds.forJtbd(task.getCustomerJtbd())
+                : CustomerRequestIds.forTask(task);
+        return normalizedBase + "/customer?request=" + requestId;
+    }
+
+    private static String customerRequestLabel(Task task) {
+        if (task.getCustomerJtbd() != null) {
+            return task.getCustomerJtbd().getJtbdType().getName();
+        }
+        if (task.getIssueType() != null && !task.getIssueType().isBlank()) {
+            return task.getIssueType().replace('_', ' ');
+        }
+        return "Support request";
     }
 
     private Optional<String> findCustomerEmail(String customerId) {
@@ -208,13 +221,13 @@ public class TicketEmailNotificationService {
                 .map(CustomerIdentityLink::getIdentifierValue);
     }
 
-    private static String buildOutboundMessageId(String ticketNumber, String fromAddress) {
+    private static String buildOutboundMessageId(String taskNumber, String fromAddress) {
         String domain = "support.local";
         int at = fromAddress != null ? fromAddress.indexOf('@') : -1;
         if (at >= 0 && at < fromAddress.length() - 1) {
             domain = fromAddress.substring(at + 1).trim();
         }
-        return "<ticket-" + ticketNumber.toLowerCase() + "-" + UUID.randomUUID() + "@" + domain + ">";
+        return "<task-" + taskNumber.toLowerCase() + "-" + UUID.randomUUID() + "@" + domain + ">";
     }
 
     private static String stripAngles(String messageId) {

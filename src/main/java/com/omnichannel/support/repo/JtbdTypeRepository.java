@@ -7,4 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface JtbdTypeRepository extends JpaRepository<JtbdType, Long> {
 
     Optional<JtbdType> findByPublicId(String publicId);
+
+    Optional<JtbdType> findByName(String name);
 }

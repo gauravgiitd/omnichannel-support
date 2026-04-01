@@ -5,8 +5,8 @@ import com.omnichannel.support.dto.DocumentDto;
 import com.omnichannel.support.dto.RegisterDocumentRequest;
 import com.omnichannel.support.security.AppUser;
 import com.omnichannel.support.security.AuthenticatedUserService;
-import com.omnichannel.support.security.TicketAccessService;
-import com.omnichannel.support.service.TicketService;
+import com.omnichannel.support.security.TaskAccessService;
+import com.omnichannel.support.service.TaskService;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -22,27 +22,27 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/v1/tickets")
+@RequestMapping("/v1/tasks")
 @RequiredArgsConstructor
 public class DocumentController {
 
-    private final TicketService ticketService;
-    private final TicketAccessService ticketAccessService;
+    private final TaskService taskService;
+    private final TaskAccessService taskAccessService;
     private final AuthenticatedUserService authenticatedUserService;
 
-    @GetMapping("/{ticketId}/documents")
+    @GetMapping("/{taskId}/documents")
     public ResponseEntity<ApiResponse<List<DocumentDto>>> listDocuments(
-            @PathVariable("ticketId") String ticketId, Authentication authentication) {
-        ticketAccessService.assertCanAccessTicket(authentication, ticketId);
-        return ResponseEntity.ok(ApiResponse.success(ticketService.listDocuments(ticketId)));
+            @PathVariable("taskId") String taskId, Authentication authentication) {
+        taskAccessService.assertCanAccessTask(authentication, taskId);
+        return ResponseEntity.ok(ApiResponse.success(taskService.listDocuments(taskId)));
     }
 
-    @PostMapping(path = "/{ticketId}/documents", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PostMapping(path = "/{taskId}/documents", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiResponse<DocumentDto>> registerDocument(
-            @PathVariable("ticketId") String ticketId,
+            @PathVariable("taskId") String taskId,
             @Valid @RequestBody RegisterDocumentRequest request,
             Authentication authentication) {
-        ticketAccessService.assertCanAccessTicket(authentication, ticketId);
+        taskAccessService.assertCanAccessTask(authentication, taskId);
         RegisterDocumentRequest trustedRequest = request;
         if (!authenticatedUserService.isAgent(authentication)) {
             AppUser user = authenticatedUserService.requireCurrentUser(authentication);
@@ -57,7 +57,7 @@ public class DocumentController {
                     request.messageBody(),
                     request.metadata());
         }
-        DocumentDto created = ticketService.registerDocument(ticketId, trustedRequest);
+        DocumentDto created = taskService.registerDocument(taskId, trustedRequest);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(created));
     }
 }

@@ -31,8 +31,8 @@ public class CustomerConversationContext {
     @Column(nullable = false, length = 32)
     private ChannelType channel;
 
-    @Column(name = "active_ticket_number", length = 32)
-    private String activeTicketNumber;
+    @Column(name = "active_task_number", length = 32)
+    private String activeTaskNumber;
 
     @Column(name = "active_customer_jtbd_public_id", length = 36)
     private String activeCustomerJtbdPublicId;
