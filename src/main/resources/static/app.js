@@ -26,7 +26,6 @@ const state = {
     agentDomainFilter: "ALL",
     selectedTaskId: localStorage.getItem(STORAGE_KEYS.taskId),
     selectedRequestId: normalizeCustomerRequestId(requestFromUrl || legacyTaskFromUrl || localStorage.getItem(STORAGE_KEYS.requestId)),
-    expertMessageScope: "relevant",
     currentTask: null,
     currentRequest: null,
     messages: [],
@@ -115,8 +114,6 @@ function bindControls() {
             renderAgentWorkspace();
         });
     }
-    bindClick("expertScopeRelevant", () => setExpertMessageScope("relevant"));
-    bindClick("expertScopeConversation", () => setExpertMessageScope("conversation"));
 }
 
 function bindForms() {
@@ -532,18 +529,28 @@ function findRelevantTaskId() {
 async function selectTask(taskId) {
     persistTaskId(taskId);
     const basePath = state.view === "expert" ? "/v1/expert/tasks" : "/v1/tasks";
-    const messagePath = state.view === "expert"
-        ? `${basePath}/${taskId}/messages?scope=${encodeURIComponent(state.expertMessageScope)}`
-        : `${basePath}/${taskId}/messages`;
-    const [taskResponse, messageResponse, documentResponse] = await Promise.all([
-        api(`${basePath}/${taskId}`),
-        api(messagePath),
-        api(`${basePath}/${taskId}/documents`)
-    ]);
+    const requests = state.view === "expert"
+        ? [
+            api(`${basePath}/${taskId}`),
+            api(`${basePath}/${taskId}/messages`),
+            api(`${basePath}/${taskId}/documents`),
+            api(`${basePath}/${taskId}/internal-messages`),
+            api(`${basePath}/${taskId}/internal-documents`)
+        ]
+        : [
+            api(`${basePath}/${taskId}`),
+            api(`${basePath}/${taskId}/messages`),
+            api(`${basePath}/${taskId}/documents`)
+        ];
+    const responses = await Promise.all(requests);
 
-    state.currentTask = taskResponse.data;
-    state.messages = messageResponse.data;
-    state.documents = documentResponse.data;
+    state.currentTask = responses[0].data;
+    state.messages = responses[1].data;
+    state.documents = responses[2].data;
+    if (state.view === "expert") {
+        state.internalTaskMessages = responses[3].data;
+        state.internalTaskDocuments = responses[4].data;
+    }
 
     syncFormsWithTask();
     if (state.view === "expert") {
@@ -925,14 +932,14 @@ function renderExpertWorkspace() {
     }
     const scopeNote = el("expertScopeNote");
     if (scopeNote) {
-        scopeNote.textContent = state.expertMessageScope === "conversation"
-            ? "You are seeing the broader customer conversation for additional context."
-            : "Messages shown here are narrowed to the linked JTBD when possible.";
+        scopeNote.textContent = "Only customer-visible messages tagged to this task's JTBD appear here.";
     }
-    setScopeButtonState();
     text("expertDocumentCount", `${state.documents.length} docs`);
+    text("expertInternalDocumentCount", `${(state.internalTaskDocuments || []).length} docs`);
     renderChatThread("expertMessageTimeline", state.messages, false);
     renderDocumentsIn("expertDocumentList", "Relevant evidence and attachments appear here.");
+    renderChatThread("expertInternalMessageTimeline", state.internalTaskMessages || [], false);
+    renderDocumentsFromList("expertInternalDocumentList", state.internalTaskDocuments || [], "Internal task attachments appear here.");
 }
 
 function filteredAgentTasks() {
@@ -1457,16 +1464,25 @@ function clearWorkspace() {
         text("expertTaskHeading", "Select an expert task");
         html("expertTaskMeta", "");
         text("expertTaskJtbdMeta", "");
-        text("expertScopeNote", "Messages shown here are narrowed to the linked JTBD when possible.");
+        text("expertScopeNote", "Only customer-visible messages tagged to this task's JTBD appear here.");
         renderChatThread("expertMessageTimeline", [], false);
         const documentList = el("expertDocumentList");
         if (documentList) {
             documentList.className = "document-list empty-state";
             documentList.textContent = "Relevant evidence and attachments appear here.";
         }
+        renderChatThread("expertInternalMessageTimeline", [], false);
+        const internalDocumentList = el("expertInternalDocumentList");
+        if (internalDocumentList) {
+            internalDocumentList.className = "document-list empty-state";
+            internalDocumentList.textContent = "Internal task attachments appear here.";
+        }
+        text("expertInternalDocumentCount", "0 docs");
         state.currentTask = null;
         state.messages = [];
         state.documents = [];
+        state.internalTaskMessages = [];
+        state.internalTaskDocuments = [];
         persistTaskId(null);
         return;
     }
@@ -1962,28 +1978,6 @@ function humanizeDomain(value) {
         return "General";
     }
     return normalized.replace(/\b\w/g, (match) => match.toUpperCase());
-}
-
-async function setExpertMessageScope(scope) {
-    if (state.expertMessageScope === scope) {
-        return;
-    }
-    state.expertMessageScope = scope;
-    setScopeButtonState();
-    if (state.view === "expert" && state.selectedTaskId) {
-        await selectTask(state.selectedTaskId);
-    }
-}
-
-function setScopeButtonState() {
-    const relevant = el("expertScopeRelevant");
-    const conversation = el("expertScopeConversation");
-    if (relevant) {
-        relevant.classList.toggle("active", state.expertMessageScope === "relevant");
-    }
-    if (conversation) {
-        conversation.classList.toggle("active", state.expertMessageScope === "conversation");
-    }
 }
 
 function el(id) {

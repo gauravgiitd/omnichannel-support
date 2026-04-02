@@ -26,7 +26,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -56,14 +55,16 @@ public class ExpertController {
 
     @GetMapping("/tasks/{taskId}/messages")
     public ResponseEntity<ApiResponse<List<MessageDto>>> listMessages(
-            @PathVariable("taskId") String taskId,
-            @RequestParam(name = "scope", defaultValue = "relevant") String scope,
-            Authentication authentication) {
+            @PathVariable("taskId") String taskId, Authentication authentication) {
         taskAccessService.assertCanAccessTask(authentication, taskId);
-        List<MessageDto> messages = "conversation".equalsIgnoreCase(scope)
-                ? taskService.listMessages(taskId)
-                : taskService.listRelevantMessages(taskId);
-        return ResponseEntity.ok(ApiResponse.success(messages));
+        return ResponseEntity.ok(ApiResponse.success(taskService.listRelevantMessages(taskId)));
+    }
+
+    @GetMapping("/tasks/{taskId}/internal-messages")
+    public ResponseEntity<ApiResponse<List<MessageDto>>> listInternalMessages(
+            @PathVariable("taskId") String taskId, Authentication authentication) {
+        taskAccessService.assertCanAccessTask(authentication, taskId);
+        return ResponseEntity.ok(ApiResponse.success(taskService.listInternalMessages(taskId)));
     }
 
     @PostMapping(path = "/tasks/{taskId}/messages", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -90,6 +91,13 @@ public class ExpertController {
             @PathVariable("taskId") String taskId, Authentication authentication) {
         taskAccessService.assertCanAccessTask(authentication, taskId);
         return ResponseEntity.ok(ApiResponse.success(taskService.listRelevantDocuments(taskId)));
+    }
+
+    @GetMapping("/tasks/{taskId}/internal-documents")
+    public ResponseEntity<ApiResponse<List<DocumentDto>>> listInternalDocuments(
+            @PathVariable("taskId") String taskId, Authentication authentication) {
+        taskAccessService.assertCanAccessTask(authentication, taskId);
+        return ResponseEntity.ok(ApiResponse.success(taskService.listInternalDocuments(taskId)));
     }
 
     @PostMapping(path = "/tasks/{taskId}/documents", consumes = MediaType.APPLICATION_JSON_VALUE)

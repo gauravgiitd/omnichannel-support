@@ -58,26 +58,38 @@
                     <div class="workspace-column">
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Messages</h4>
-                                <div class="scope-toggle">
-                                    <button type="button" class="ghost-button scope-button active" id="expertScopeRelevant">Relevant slice</button>
-                                    <button type="button" class="ghost-button scope-button" id="expertScopeConversation">Broader conversation</button>
-                                </div>
+                                <h4>Agent-customer conversation</h4>
                             </div>
-                            <p id="expertScopeNote" class="small-note">Messages shown here are narrowed to the linked JTBD when possible.</p>
-                            <div id="expertMessageTimeline" class="chat-thread empty-state">Select an expert task to load messages.</div>
+                            <p id="expertScopeNote" class="small-note">Only customer-visible messages tagged to this task's JTBD appear here.</p>
+                            <div id="expertMessageTimeline" class="chat-thread empty-state">Select an expert task to load customer-facing JTBD messages.</div>
                         </div>
 
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Documents</h4>
+                                <h4>Agent-customer documents</h4>
                                 <span id="expertDocumentCount" class="small-note">0 docs</span>
                             </div>
-                            <div id="expertDocumentList" class="document-list empty-state">Relevant evidence and attachments appear here.</div>
+                            <div id="expertDocumentList" class="document-list empty-state">Only documents tagged to this task's JTBD appear here.</div>
                         </div>
                     </div>
 
                     <div class="workspace-column">
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Agent-expert conversation</h4>
+                            </div>
+                            <p class="small-note">Internal task-only collaboration stays here and is never shown to the customer.</p>
+                            <div id="expertInternalMessageTimeline" class="chat-thread empty-state">Select an expert task to load internal task messages.</div>
+                        </div>
+
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Agent-expert documents</h4>
+                                <span id="expertInternalDocumentCount" class="small-note">0 docs</span>
+                            </div>
+                            <div id="expertInternalDocumentList" class="document-list empty-state">Internal task attachments appear here.</div>
+                        </div>
+
                         <div class="subpanel">
                             <div class="subpanel-head">
                                 <h4>Add expert update</h4>
