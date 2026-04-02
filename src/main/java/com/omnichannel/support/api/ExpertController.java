@@ -80,8 +80,8 @@ public class ExpertController {
                 request.body(),
                 request.attachmentUrls(),
                 request.externalThreadRef(),
-                request.metadata());
-        MessageDto message = taskService.postMessage(taskId, trusted);
+                request.metadata() != null ? request.metadata() : java.util.Map.of());
+        MessageDto message = taskService.postInternalMessage(taskId, trusted);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(message));
     }
 
@@ -89,7 +89,7 @@ public class ExpertController {
     public ResponseEntity<ApiResponse<List<DocumentDto>>> listDocuments(
             @PathVariable("taskId") String taskId, Authentication authentication) {
         taskAccessService.assertCanAccessTask(authentication, taskId);
-        return ResponseEntity.ok(ApiResponse.success(taskService.listDocuments(taskId)));
+        return ResponseEntity.ok(ApiResponse.success(taskService.listRelevantDocuments(taskId)));
     }
 
     @PostMapping(path = "/tasks/{taskId}/documents", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -108,8 +108,8 @@ public class ExpertController {
                 request.claimId(),
                 request.policyId(),
                 request.messageBody(),
-                request.metadata());
-        DocumentDto created = taskService.registerDocument(taskId, trusted);
+                request.metadata() != null ? request.metadata() : java.util.Map.of());
+        DocumentDto created = taskService.registerInternalDocument(taskId, trusted);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(created));
     }
 

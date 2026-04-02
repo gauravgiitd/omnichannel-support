@@ -55,6 +55,28 @@ public class DocumentService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<DocumentDto> listCustomerVisibleByConversation(Conversation conversation, CustomerJtbd customerJtbd) {
+        if (conversation == null) {
+            return List.of();
+        }
+        return taskDocumentRepository.findByConversationOrderByCreatedAtAsc(conversation).stream()
+                .filter(doc -> !isInternalOnly(parseObjectMap(doc.getMetadataJson())))
+                .filter(doc -> customerJtbd == null
+                        || doc.getCustomerJtbd() == null
+                        || doc.getCustomerJtbd().getId().equals(customerJtbd.getId()))
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<DocumentDto> listInternalByTask(Task task) {
+        return taskDocumentRepository.findByTaskOrderByCreatedAtAsc(task).stream()
+                .filter(doc -> isInternalOnly(parseObjectMap(doc.getMetadataJson())))
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
     @Transactional
     public DocumentDto register(
             Task task,
@@ -183,5 +205,10 @@ public class DocumentService {
         } catch (JsonProcessingException e) {
             return new HashMap<>();
         }
+    }
+
+    private static boolean isInternalOnly(Map<String, Object> metadata) {
+        Object audience = metadata.get(ConversationService.AUDIENCE_KEY);
+        return audience != null && ConversationService.AUDIENCE_INTERNAL.equalsIgnoreCase(audience.toString());
     }
 }

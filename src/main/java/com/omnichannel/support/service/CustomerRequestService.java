@@ -67,18 +67,18 @@ public class CustomerRequestService {
     public List<MessageDto> listMessages(String customerId, String requestId) {
         RequestAggregate aggregate = resolveRequest(customerId, requestId);
         if (CustomerRequestIds.isConversationRequest(requestId)) {
-            return conversationService.listTimeline(aggregate.conversation);
+            return conversationService.listCustomerVisibleTimeline(aggregate.conversation);
         }
-        return conversationService.listTimeline(aggregate.conversation, aggregate.customerJtbd);
+        return conversationService.listCustomerVisibleTimeline(aggregate.conversation, aggregate.customerJtbd);
     }
 
     @Transactional(readOnly = true)
     public List<DocumentDto> listDocuments(String customerId, String requestId) {
         RequestAggregate aggregate = resolveRequest(customerId, requestId);
         if (CustomerRequestIds.isConversationRequest(requestId)) {
-            return documentService.listByConversation(aggregate.conversation, null);
+            return documentService.listCustomerVisibleByConversation(aggregate.conversation, null);
         }
-        return documentService.listByConversation(aggregate.conversation, aggregate.customerJtbd);
+        return documentService.listCustomerVisibleByConversation(aggregate.conversation, aggregate.customerJtbd);
     }
 
     @Transactional

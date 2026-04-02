@@ -27,6 +27,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ConversationService {
 
+    public static final String AUDIENCE_KEY = "audience";
+    public static final String AUDIENCE_CUSTOMER = "CUSTOMER";
+    public static final String AUDIENCE_INTERNAL = "INTERNAL";
+
     private final MessageRepository messageRepository;
     private final ObjectMapper objectMapper;
     private final MessageLinkService messageLinkService;
@@ -49,6 +53,17 @@ public class ConversationService {
     }
 
     @Transactional(readOnly = true)
+    public List<MessageDto> listCustomerVisibleTimeline(Conversation conversation) {
+        if (conversation == null) {
+            return List.of();
+        }
+        return messageRepository.findByConversationOrderByCreatedAtAsc(conversation).stream()
+                .filter(message -> !isInternalOnly(parseObjectMap(message.getMetadataJson())))
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
     public List<MessageDto> listTimeline(Conversation conversation, CustomerJtbd customerJtbd) {
         if (conversation == null) {
             return List.of();
@@ -59,6 +74,30 @@ public class ConversationService {
         return messageRepository.findByConversationOrderByCreatedAtAsc(conversation).stream()
                 .filter(message -> message.getCustomerJtbd() == null
                         || message.getCustomerJtbd().getId().equals(customerJtbd.getId()))
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageDto> listCustomerVisibleTimeline(Conversation conversation, CustomerJtbd customerJtbd) {
+        if (conversation == null) {
+            return List.of();
+        }
+        if (customerJtbd == null) {
+            return listCustomerVisibleTimeline(conversation);
+        }
+        return messageRepository.findByConversationOrderByCreatedAtAsc(conversation).stream()
+                .filter(message -> !isInternalOnly(parseObjectMap(message.getMetadataJson())))
+                .filter(message -> message.getCustomerJtbd() == null
+                        || message.getCustomerJtbd().getId().equals(customerJtbd.getId()))
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageDto> listInternalTimeline(Task task) {
+        return messageRepository.findByTaskOrderByCreatedAtAsc(task).stream()
+                .filter(message -> isInternalOnly(parseObjectMap(message.getMetadataJson())))
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
@@ -186,6 +225,11 @@ public class ConversationService {
             return MessageIntentType.REQUEST_UPDATE;
         }
         return MessageIntentType.GENERAL_QUERY;
+    }
+
+    private static boolean isInternalOnly(Map<String, Object> metadata) {
+        Object audience = metadata.get(AUDIENCE_KEY);
+        return audience != null && AUDIENCE_INTERNAL.equalsIgnoreCase(audience.toString());
     }
 
     @SuppressWarnings("unchecked")

@@ -417,6 +417,10 @@ label {
     background: rgba(255, 255, 255, 0.72);
 }
 
+.agent-workspace .customer-compose-form {
+    margin-top: 14px;
+}
+
 .task-card:hover,
 .task-card.active {
     transform: translateY(-2px);

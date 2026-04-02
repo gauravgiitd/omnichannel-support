@@ -129,7 +129,7 @@ public class TaskService {
         conversationService.appendMessage(
                 task,
                 request.sourceChannel(),
-                SenderType.CUSTOMER,
+                sendCustomerNotification ? SenderType.CUSTOMER : SenderType.SYSTEM,
                 sender,
                 request.initialMessageBody(),
                 List.of(),
@@ -242,6 +242,12 @@ public class TaskService {
         return conversationService.listTimeline(task);
     }
 
+    @Transactional(readOnly = true)
+    public List<MessageDto> listInternalMessages(String taskNumber) {
+        Task task = loadCanonicalTask(taskNumber);
+        return conversationService.listInternalTimeline(task);
+    }
+
     @Transactional
     public MessageDto postMessage(String taskNumber, PostMessageRequest request) {
         Task task = loadCanonicalTask(taskNumber);
@@ -251,7 +257,7 @@ public class TaskService {
         }
         ChannelType channel = request.channel();
         String externalThreadRef = request.externalThreadRef();
-        if (request.senderType() == SenderType.AGENT) {
+        if (request.senderType() == SenderType.AGENT && !isInternal(metadata)) {
             try {
                 TaskOriginReplyService.OutboundDeliveryResult delivery =
                         taskOriginReplyService.deliverAgentReply(task, request.senderIdentifier(), request.body());
@@ -305,10 +311,40 @@ public class TaskService {
         return message;
     }
 
+    @Transactional
+    public MessageDto postInternalMessage(String taskNumber, PostMessageRequest request) {
+        Task task = loadCanonicalTask(taskNumber);
+        Map<String, Object> metadata = new HashMap<>();
+        if (request.metadata() != null) {
+            metadata.putAll(request.metadata());
+        }
+        metadata.put(ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_INTERNAL);
+        MessageDto message = conversationService.appendMessage(
+                task,
+                request.channel(),
+                request.senderType(),
+                request.senderIdentifier(),
+                request.body(),
+                request.attachmentUrls() != null ? request.attachmentUrls() : List.of(),
+                request.externalThreadRef(),
+                metadata);
+        handlingSessionService.startOrContinue(
+                task.getConversation(),
+                task.getAssignedQueue() != null ? task.getAssignedQueue() : "queue-triage",
+                request.senderIdentifier());
+        return message;
+    }
+
     @Transactional(readOnly = true)
     public List<DocumentDto> listDocuments(String taskNumber) {
         Task task = loadCanonicalTask(taskNumber);
         return documentService.listByTask(task);
+    }
+
+    @Transactional(readOnly = true)
+    public List<DocumentDto> listInternalDocuments(String taskNumber) {
+        Task task = loadCanonicalTask(taskNumber);
+        return documentService.listInternalByTask(task);
     }
 
     @Transactional
@@ -329,7 +365,7 @@ public class TaskService {
                         request.policyId(),
                         meta);
 
-        if (request.senderType() == SenderType.AGENT) {
+        if (request.senderType() == SenderType.AGENT && !isInternal(meta)) {
             try {
                 TaskOriginReplyService.OutboundDeliveryResult delivery =
                         taskOriginReplyService.deliverAgentDocument(
@@ -372,6 +408,45 @@ public class TaskService {
                 request.senderIdentifier(),
                 Map.of("document_id", doc.documentId()));
 
+        return doc;
+    }
+
+    @Transactional
+    public DocumentDto registerInternalDocument(String taskNumber, RegisterDocumentRequest request) {
+        Task task = loadCanonicalTask(taskNumber);
+        Map<String, Object> meta = new HashMap<>();
+        if (request.metadata() != null) {
+            meta.putAll(request.metadata());
+        }
+        meta.put(ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_INTERNAL);
+        DocumentDto doc =
+                documentService.register(
+                        task,
+                        task.getCustomerId(),
+                        request.channel(),
+                        request.fileUrl(),
+                        request.documentType(),
+                        request.claimId(),
+                        request.policyId(),
+                        meta);
+        MessageDto message = conversationService.appendMessage(
+                task,
+                request.channel(),
+                request.senderType(),
+                request.senderIdentifier(),
+                documentMessageBody(request),
+                List.of(doc.fileUrl()),
+                null,
+                Map.of(
+                        "attachment_ids", List.of(doc.documentId()),
+                        ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_INTERNAL));
+        var savedDocument = documentService.getByPublicId(doc.documentId());
+        var savedMessage = messageRepository.findByPublicId(message.messageId()).orElse(null);
+        documentLinkService.link(savedDocument, task.getConversation(), savedMessage, task.getCustomerJtbd(), task);
+        handlingSessionService.startOrContinue(
+                task.getConversation(),
+                task.getAssignedQueue() != null ? task.getAssignedQueue() : "queue-triage",
+                request.senderIdentifier());
         return doc;
     }
 
@@ -440,7 +515,34 @@ public class TaskService {
         if (task.getConversation() == null) {
             return conversationService.listTimeline(task);
         }
-        return conversationService.listTimeline(task.getConversation(), task.getCustomerJtbd());
+        return java.util.stream.Stream.concat(
+                        conversationService
+                                .listCustomerVisibleTimeline(task.getConversation(), task.getCustomerJtbd())
+                                .stream(),
+                        conversationService.listInternalTimeline(task).stream())
+                .collect(Collectors.toMap(MessageDto::messageId, message -> message, (left, right) -> left))
+                .values()
+                .stream()
+                .sorted(java.util.Comparator.comparing(MessageDto::createdAt))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<DocumentDto> listRelevantDocuments(String taskNumber) {
+        Task task = loadCanonicalTask(taskNumber);
+        if (task.getConversation() == null) {
+            return documentService.listByTask(task);
+        }
+        return java.util.stream.Stream.concat(
+                        documentService
+                                .listCustomerVisibleByConversation(task.getConversation(), task.getCustomerJtbd())
+                                .stream(),
+                        documentService.listInternalByTask(task).stream())
+                .collect(Collectors.toMap(DocumentDto::documentId, document -> document, (left, right) -> left))
+                .values()
+                .stream()
+                .sorted(java.util.Comparator.comparing(DocumentDto::createdAt))
+                .toList();
     }
 
     public Task loadCanonicalTask(String taskNumber) {
@@ -477,5 +579,10 @@ public class TaskService {
     public List<Task> findOpenTasksForCustomer(String customerId) {
         return taskRepository.findByCustomerIdAndStatusInOrderByCreatedAtDesc(
                 customerId, OPEN_LIKE);
+    }
+
+    private static boolean isInternal(Map<String, Object> metadata) {
+        Object audience = metadata.get(ConversationService.AUDIENCE_KEY);
+        return audience != null && ConversationService.AUDIENCE_INTERNAL.equalsIgnoreCase(audience.toString());
     }
 }

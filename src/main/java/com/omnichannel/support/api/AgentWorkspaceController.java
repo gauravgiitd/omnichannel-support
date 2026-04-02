@@ -2,11 +2,13 @@ package com.omnichannel.support.api;
 
 import com.omnichannel.support.dto.AgentCustomerWorkspaceDto;
 import com.omnichannel.support.dto.ApiResponse;
+import com.omnichannel.support.dto.CreateExpertTaskRequest;
 import com.omnichannel.support.dto.CustomerSummaryDto;
 import com.omnichannel.support.dto.DocumentDto;
 import com.omnichannel.support.dto.MessageDto;
 import com.omnichannel.support.dto.PostMessageRequest;
 import com.omnichannel.support.dto.RegisterDocumentRequest;
+import com.omnichannel.support.dto.TaskDto;
 import com.omnichannel.support.security.AppUser;
 import com.omnichannel.support.security.AuthenticatedUserService;
 import com.omnichannel.support.service.AgentWorkspaceService;
@@ -65,5 +67,53 @@ public class AgentWorkspaceController {
         DocumentDto document =
                 agentWorkspaceService.registerConversationDocument(customerId, user.email(), taskId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(document));
+    }
+
+    @GetMapping("/customers/{customerId}/tasks/{taskId}/messages")
+    public ResponseEntity<ApiResponse<List<MessageDto>>> listInternalTaskMessages(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("taskId") String taskId) {
+        return ResponseEntity.ok(ApiResponse.success(agentWorkspaceService.listInternalTaskMessages(customerId, taskId)));
+    }
+
+    @GetMapping("/customers/{customerId}/tasks/{taskId}/documents")
+    public ResponseEntity<ApiResponse<List<DocumentDto>>> listInternalTaskDocuments(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("taskId") String taskId) {
+        return ResponseEntity.ok(ApiResponse.success(agentWorkspaceService.listInternalTaskDocuments(customerId, taskId)));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/tasks/{taskId}/messages", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<MessageDto>> postInternalTaskMessage(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("taskId") String taskId,
+            @Valid @RequestBody PostMessageRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        MessageDto message =
+                agentWorkspaceService.postInternalTaskMessage(customerId, user.email(), taskId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(message));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/tasks/{taskId}/documents", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<DocumentDto>> registerInternalTaskDocument(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("taskId") String taskId,
+            @Valid @RequestBody RegisterDocumentRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        DocumentDto document =
+                agentWorkspaceService.registerInternalTaskDocument(customerId, user.email(), taskId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(document));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/expert-tasks", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<TaskDto>> createExpertTask(
+            @PathVariable("customerId") String customerId,
+            @Valid @RequestBody CreateExpertTaskRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        TaskDto task = agentWorkspaceService.createExpertTask(customerId, user.email(), request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(task));
     }
 }

@@ -31,6 +31,8 @@ const state = {
     currentRequest: null,
     messages: [],
     documents: [],
+    internalTaskMessages: [],
+    internalTaskDocuments: [],
     events: []
 };
 
@@ -169,7 +171,7 @@ function bindForms() {
                     `The reply was added to the conversation, but delivery to ${origin} failed${deliveryError ? `: ${deliveryError}` : "."}`
                 );
             } else {
-                pushEvent("Agent responded", `The reply was recorded in the shared conversation${state.selectedTaskId ? ` on ${state.selectedTaskId}` : ""}.`);
+                pushEvent("Agent responded", `The reply was recorded in the customer-visible conversation${state.selectedTaskId ? ` on ${state.selectedTaskId}` : ""}.`);
             }
             await refreshBoard(state.agentCustomerFilter);
             return;
@@ -237,6 +239,24 @@ function bindForms() {
         await refreshBoard(response.data.task_id);
     });
 
+    bindSubmit("expertTaskCreateForm", async (event) => {
+        ensureAgentCustomerSelected();
+        const data = new FormData(event.currentTarget);
+        const response = await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/expert-tasks`, {
+            method: "POST",
+            body: {
+                customer_jtbd_id: blankOrNull(data.get("customerJtbdId")),
+                issue_type: data.get("issueType"),
+                assigned_queue: data.get("assignedQueue"),
+                priority: data.get("priority"),
+                body: data.get("body")
+            }
+        });
+        pushEvent("Expert task created", `${response.data.task_id} was created for explicit domain-expert handling.`);
+        event.currentTarget.reset();
+        await refreshBoard(state.agentCustomerFilter);
+    });
+
     bindSubmit("expertReplyForm", async (event) => {
         ensureTaskSelected();
         const data = new FormData(event.currentTarget);
@@ -292,6 +312,49 @@ function bindForms() {
 
         pushEvent("Expert task updated", `${response.data.task_id} is now ${response.data.status || "updated"}.`);
         await refreshBoard(response.data.task_id);
+    });
+
+    bindSubmit("agentInternalTaskForm", async (event) => {
+        ensureAgentCustomerSelected();
+        ensureTaskSelected();
+        const data = new FormData(event.currentTarget);
+        const body = data.get("body");
+        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
+
+        await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/tasks/${encodeURIComponent(state.selectedTaskId)}/messages`, {
+            method: "POST",
+            body: {
+                channel: "UI",
+                sender_type: "AGENT",
+                sender_identifier: state.user.email,
+                body,
+                attachment_urls: [],
+                metadata: { source: "agent_internal_task_workspace" }
+            }
+        });
+
+        for (const file of uploadedFiles) {
+            await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/tasks/${encodeURIComponent(state.selectedTaskId)}/documents`, {
+                method: "POST",
+                body: {
+                    channel: "UI",
+                    sender_type: "AGENT",
+                    sender_identifier: state.user.email,
+                    file_url: file.file_token,
+                    document_type: "agent_internal_attachment",
+                    message_body: "Agent attached an internal task document.",
+                    metadata: {
+                        source: "agent_internal_task_workspace_upload",
+                        drive_file_id: driveFileIdFromToken(file.file_token),
+                        file_name: file.file_name,
+                        mime_type: file.mime_type
+                    }
+                }
+            });
+        }
+
+        pushEvent("Internal task updated", `The internal note was added to ${state.selectedTaskId} and stays off the customer view.`);
+        await refreshBoard(state.agentCustomerFilter);
     });
 
     bindSubmit("adminCleanupForm", async (event) => {
@@ -557,8 +620,10 @@ async function selectAgentCustomer(customerId) {
     state.currentTask = (state.tasks || []).find((task) => task.task_id === state.selectedTaskId) || null;
     populateAgentCustomerFilter();
     populateAgentDomainFilter();
+    populateAgentExpertTaskJtbdSelect();
     renderMetrics();
     renderAgentCustomerList();
+    await refreshAgentInternalTaskWorkspace();
     renderAgentWorkspace();
 }
 
@@ -876,12 +941,14 @@ function renderAgentWorkspace() {
     renderAgentTasks();
     renderAgentAssignments();
     renderAgentHandlingSessions();
+    populateAgentExpertTaskJtbdSelect();
+    renderAgentInternalTaskWorkspace();
     syncFormsWithTask();
     text(
         "agentReplyTargetNote",
         state.selectedTaskId
-            ? `Replies are added to the shared conversation and anchored to ${state.selectedTaskId}.`
-            : "Replies are added to the shared conversation. The newest open task will be used if one exists."
+            ? `Replies are added to the customer-visible conversation and anchored to ${state.selectedTaskId}.`
+            : "Replies are added to the customer-visible conversation. The newest open task will be used if one exists."
     );
 }
 
@@ -947,6 +1014,20 @@ function populateAgentCustomerFilter() {
     `;
     select.value = customers.includes(current) ? current : "";
     state.agentCustomerFilter = select.value;
+}
+
+function populateAgentExpertTaskJtbdSelect() {
+    const select = el("agentExpertTaskJtbdSelect");
+    if (!select) {
+        return;
+    }
+    const jtbds = state.agentWorkspace?.jtbds || [];
+    select.innerHTML = `
+        <option value="">No JTBD selected</option>
+        ${jtbds.map((jtbd) => `<option value="${escapeHtml(jtbd.public_id)}">${escapeHtml(jtbd.jtbd_type_name)} • ${escapeHtml(jtbd.current_stage_name || jtbd.status || "Active")}</option>`).join("")}
+    `;
+    const selectedJtbdId = state.currentTask?.customer_jtbd_id || "";
+    select.value = jtbds.some((jtbd) => jtbd.public_id === selectedJtbdId) ? selectedJtbdId : "";
 }
 
 function populateAgentDomainFilter() {
@@ -1029,12 +1110,25 @@ function renderAgentTasks() {
     container.className = "queue-stack";
     container.innerHTML = tasks.map(renderTaskCard).join("");
     container.querySelectorAll(".task-card").forEach((card) => {
-        card.addEventListener("click", () => {
+        card.addEventListener("click", async () => {
             persistTaskId(card.dataset.taskId);
             state.currentTask = (state.tasks || []).find((task) => task.task_id === card.dataset.taskId) || null;
+            await refreshAgentInternalTaskWorkspace();
             renderAgentWorkspace();
         });
     });
+}
+
+function renderAgentInternalTaskWorkspace() {
+    text(
+        "agentInternalTaskNote",
+        state.selectedTaskId
+            ? `Internal agent and expert collaboration for ${state.selectedTaskId}. This does not appear in the customer view.`
+            : "Select a task to see the internal agent and expert discussion for that task."
+    );
+    renderChatThread("agentInternalMessageTimeline", state.internalTaskMessages || [], false);
+    renderDocumentsFromList("agentInternalDocumentList", state.internalTaskDocuments || [], "Internal task attachments appear here.");
+    text("agentInternalDocumentCount", `${(state.internalTaskDocuments || []).length} docs`);
 }
 
 function renderAgentAssignments() {
@@ -1336,12 +1430,18 @@ function clearWorkspace() {
         html("agentHandlingSessionList", "No handling sessions yet.");
         text("timelineCount", "Select a customer to load the full conversation.");
         text("documentCount", "0 docs");
-        text("agentReplyTargetNote", "Replies are added to the shared conversation and anchored to the selected task when one is available.");
+        text("agentReplyTargetNote", "Replies are added to the customer-visible conversation and anchored to the selected task when one is available.");
+        renderChatThread("agentInternalMessageTimeline", [], false);
+        renderDocumentsFromList("agentInternalDocumentList", [], "Internal task attachments appear here.");
+        text("agentInternalDocumentCount", "0 docs");
+        text("agentInternalTaskNote", "Select a task to see the internal agent and expert discussion for that task.");
         state.agentWorkspace = null;
     }
     state.currentTask = null;
     state.messages = [];
     state.documents = [];
+    state.internalTaskMessages = [];
+    state.internalTaskDocuments = [];
     persistTaskId(null);
     renderCustomerExperience();
     renderCustomerTaskList();
@@ -1756,6 +1856,25 @@ function filteredAgentHandlingSessions() {
         return all;
     }
     return all.filter((session) => humanizeDomain(session.assigned_group) === state.agentDomainFilter);
+}
+
+async function refreshAgentInternalTaskWorkspace() {
+    if (state.view !== "agent" || !state.agentCustomerFilter || !state.selectedTaskId) {
+        state.internalTaskMessages = [];
+        state.internalTaskDocuments = [];
+        return;
+    }
+    try {
+        const [messagesResponse, documentsResponse] = await Promise.all([
+            api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/tasks/${encodeURIComponent(state.selectedTaskId)}/messages`),
+            api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/tasks/${encodeURIComponent(state.selectedTaskId)}/documents`)
+        ]);
+        state.internalTaskMessages = messagesResponse.data || [];
+        state.internalTaskDocuments = documentsResponse.data || [];
+    } catch (_error) {
+        state.internalTaskMessages = [];
+        state.internalTaskDocuments = [];
+    }
 }
 
 function domainForTask(task) {

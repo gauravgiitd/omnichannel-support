@@ -9,10 +9,16 @@ import com.omnichannel.support.domain.Task;
 import com.omnichannel.support.domain.TaskDocument;
 import com.omnichannel.support.error.NotFoundException;
 import com.omnichannel.support.repo.AuditLogRepository;
+import com.omnichannel.support.repo.AssignmentRepository;
 import com.omnichannel.support.repo.ConversationRepository;
 import com.omnichannel.support.repo.CustomerContactMappingRepository;
+import com.omnichannel.support.repo.CustomerConversationContextRepository;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
+import com.omnichannel.support.repo.CustomerJtbdRepository;
+import com.omnichannel.support.repo.DocumentLinkRepository;
+import com.omnichannel.support.repo.HandlingSessionRepository;
 import com.omnichannel.support.repo.MessageRepository;
+import com.omnichannel.support.repo.MessageJtbdLinkRepository;
 import com.omnichannel.support.repo.TaskDocumentRepository;
 import com.omnichannel.support.repo.TaskMergeMapRepository;
 import com.omnichannel.support.repo.TaskRepository;
@@ -34,7 +40,13 @@ public class AdminCleanupService {
     private final TaskMergeMapRepository taskMergeMapRepository;
     private final ConversationRepository conversationRepository;
     private final CustomerContactMappingRepository customerContactMappingRepository;
+    private final CustomerConversationContextRepository customerConversationContextRepository;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
+    private final CustomerJtbdRepository customerJtbdRepository;
+    private final DocumentLinkRepository documentLinkRepository;
+    private final MessageJtbdLinkRepository messageJtbdLinkRepository;
+    private final AssignmentRepository assignmentRepository;
+    private final HandlingSessionRepository handlingSessionRepository;
     private final AuditLogRepository auditLogRepository;
     private final TaskRepository taskRepository;
     private final GoogleDriveStorageService googleDriveStorageService;
@@ -57,6 +69,12 @@ public class AdminCleanupService {
         int identityCount = customerIdentityLinkRepository.findAll().size();
         int auditCount = auditLogRepository.findAll().size();
         int taskCount = taskRepository.findAll().size();
+        int jtbdCount = customerJtbdRepository.findAll().size();
+        int contextCount = customerConversationContextRepository.findAll().size();
+        int assignmentCount = assignmentRepository.findAll().size();
+        int handlingSessionCount = handlingSessionRepository.findAll().size();
+        int messageLinkCount = messageJtbdLinkRepository.findAll().size();
+        int documentLinkCount = documentLinkRepository.findAll().size();
 
         int deletedDriveFiles = 0;
         int deletedDriveFolders = 0;
@@ -79,10 +97,16 @@ public class AdminCleanupService {
         }
 
         auditLogRepository.deleteAllInBatch();
+        documentLinkRepository.deleteAllInBatch();
+        messageJtbdLinkRepository.deleteAllInBatch();
+        assignmentRepository.deleteAllInBatch();
+        handlingSessionRepository.deleteAllInBatch();
         messageRepository.deleteAllInBatch();
         taskDocumentRepository.deleteAllInBatch();
         taskMergeMapRepository.deleteAllInBatch();
+        customerConversationContextRepository.deleteAllInBatch();
         customerIdentityLinkRepository.deleteAllInBatch();
+        customerJtbdRepository.deleteAllInBatch();
         taskRepository.deleteAllInBatch();
         conversationRepository.deleteAllInBatch();
 
@@ -93,7 +117,7 @@ public class AdminCleanupService {
                 identityCount,
                 0,
                 mergeCount,
-                auditCount,
+                auditCount + jtbdCount + contextCount + assignmentCount + handlingSessionCount + messageLinkCount + documentLinkCount,
                 deletedDriveFiles,
                 deletedDriveFolders);
     }
@@ -120,13 +144,16 @@ public class AdminCleanupService {
                 .map(CustomerIdentityLink::getIdentifierValue)
                 .collect(java.util.stream.Collectors.toSet());
 
-        List<com.omnichannel.support.domain.CustomerContactMapping> contactMappings = customerContactMappingRepository
-                .findAll()
-                .stream()
-                .filter(mapping -> emails.contains(mapping.getEmail()) || phones.contains(mapping.getPhone()))
-                .toList();
+        List<com.omnichannel.support.domain.CustomerJtbd> customerJtbds = normalizedCustomerId == null || normalizedCustomerId.isBlank()
+                ? List.of()
+                : customerJtbdRepository.findByCustomerIdOrderByCreatedAtDesc(normalizedCustomerId);
+        List<com.omnichannel.support.domain.CustomerConversationContext> contexts = normalizedCustomerId == null || normalizedCustomerId.isBlank()
+                ? List.of()
+                : customerConversationContextRepository.findAll().stream()
+                        .filter(context -> normalizedCustomerId.equals(context.getCustomerId()))
+                        .toList();
 
-        if (tasks.isEmpty() && identityLinks.isEmpty() && conversation == null) {
+        if (tasks.isEmpty() && identityLinks.isEmpty() && conversation == null && customerJtbds.isEmpty() && contexts.isEmpty()) {
             throw new NotFoundException("no customer data found for " + normalizedCustomerId);
         }
 
@@ -139,6 +166,23 @@ public class AdminCleanupService {
         List<com.omnichannel.support.domain.TaskMergeMap> merges = tasks.isEmpty()
                 ? List.of()
                 : taskMergeMapRepository.findByPrimaryTaskInOrMergedTaskIn(tasks, tasks);
+        List<com.omnichannel.support.domain.Assignment> assignments = conversation != null
+                ? assignmentRepository.findByConversationOrderByAssignedAtDesc(conversation)
+                : List.of();
+        List<com.omnichannel.support.domain.HandlingSession> handlingSessions = conversation != null
+                ? handlingSessionRepository.findByConversationOrderByStartAtDesc(conversation)
+                : List.of();
+        List<com.omnichannel.support.domain.MessageJtbdLink> messageJtbdLinks = new ArrayList<>();
+        messages.forEach(message -> messageJtbdLinks.addAll(messageJtbdLinkRepository.findByMessage(message)));
+        customerJtbds.forEach(jtbd -> messageJtbdLinks.addAll(messageJtbdLinkRepository.findByCustomerJtbd(jtbd)));
+        List<com.omnichannel.support.domain.DocumentLink> documentLinks = new ArrayList<>();
+        documents.forEach(document -> documentLinks.addAll(documentLinkRepository.findByDocument(document)));
+        messages.forEach(message -> documentLinks.addAll(documentLinkRepository.findByMessage(message)));
+        customerJtbds.forEach(jtbd -> documentLinks.addAll(documentLinkRepository.findByCustomerJtbd(jtbd)));
+        tasks.forEach(task -> documentLinks.addAll(documentLinkRepository.findByTask(task)));
+        if (conversation != null) {
+            documentLinks.addAll(documentLinkRepository.findByConversation(conversation));
+        }
 
         Set<String> driveFileIds = new HashSet<>();
         Set<String> driveFolderIds = new HashSet<>();
@@ -183,6 +227,18 @@ public class AdminCleanupService {
         if (!auditLogs.isEmpty()) {
             auditLogRepository.deleteAllInBatch(auditLogs);
         }
+        if (!documentLinks.isEmpty()) {
+            documentLinkRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(documentLinks)));
+        }
+        if (!messageJtbdLinks.isEmpty()) {
+            messageJtbdLinkRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(messageJtbdLinks)));
+        }
+        if (!assignments.isEmpty()) {
+            assignmentRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(assignments)));
+        }
+        if (!handlingSessions.isEmpty()) {
+            handlingSessionRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(handlingSessions)));
+        }
         if (!messages.isEmpty()) {
             messageRepository.deleteAllInBatch(messages);
         }
@@ -194,6 +250,12 @@ public class AdminCleanupService {
         }
         if (!identityLinks.isEmpty()) {
             customerIdentityLinkRepository.deleteAllInBatch(identityLinks);
+        }
+        if (!contexts.isEmpty()) {
+            customerConversationContextRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(contexts)));
+        }
+        if (!customerJtbds.isEmpty()) {
+            customerJtbdRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(customerJtbds)));
         }
         if (!tasks.isEmpty()) {
             taskRepository.deleteAllInBatch(tasks);
