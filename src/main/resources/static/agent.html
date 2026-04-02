@@ -133,22 +133,6 @@
 
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Routing and handling</h4>
-                            </div>
-                            <div class="stack-form compact">
-                                <div>
-                                    <strong>Assignments</strong>
-                                    <div id="agentAssignmentList" class="queue-stack empty-state">No routing assignments yet.</div>
-                                </div>
-                                <div>
-                                    <strong>Handling sessions</strong>
-                                    <div id="agentHandlingSessionList" class="queue-stack empty-state">No handling sessions yet.</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="subpanel">
-                            <div class="subpanel-head">
                                 <h4>Create expert task</h4>
                             </div>
                             <form id="expertTaskCreateForm" class="stack-form compact">
@@ -187,27 +171,6 @@
                                     <textarea name="body" rows="4" required>Please review the latest request details and continue the execution work on this task.</textarea>
                                 </label>
                                 <button type="submit">Create expert task</button>
-                            </form>
-                        </div>
-
-                        <div class="subpanel">
-                            <div class="subpanel-head">
-                                <h4>Selected task status</h4>
-                            </div>
-                            <form id="patchForm" class="stack-form compact">
-                                <p class="small-note">Update the selected task when operational work changes state.</p>
-                                <label>
-                                    Status
-                                    <select name="status">
-                                        <option value="">Leave unchanged</option>
-                                        <option value="ASSIGNED">ASSIGNED</option>
-                                        <option value="PENDING_INTERNAL">PENDING_INTERNAL</option>
-                                        <option value="PENDING_CUSTOMER">PENDING_CUSTOMER</option>
-                                        <option value="RESOLVED">RESOLVED</option>
-                                        <option value="CLOSED">CLOSED</option>
-                                    </select>
-                                </label>
-                                <button type="submit">Update selected task</button>
                             </form>
                         </div>
 

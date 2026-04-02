@@ -225,20 +225,6 @@ function bindForms() {
         await refreshBoard(state.selectedTaskId);
     });
 
-    bindSubmit("patchForm", async (event) => {
-        ensureTaskSelected();
-        const data = new FormData(event.currentTarget);
-        const response = await api(`/v1/tasks/${state.selectedTaskId}`, {
-            method: "PATCH",
-            body: pruneEmpty({
-                status: data.get("status")
-            })
-        });
-
-        pushEvent("Task updated", `${response.data.task_id} is now ${response.data.status}.`);
-        await refreshBoard(response.data.task_id);
-    });
-
     bindSubmit("expertTaskCreateForm", async (event) => {
         ensureAgentCustomerSelected();
         const data = new FormData(event.currentTarget);
@@ -959,8 +945,6 @@ function renderAgentWorkspace() {
     renderDocumentsFromList("documentList", filteredDocuments, "Documents shared from any channel appear here.");
     renderAgentJtbds();
     renderAgentTasks();
-    renderAgentAssignments();
-    renderAgentHandlingSessions();
     populateAgentExpertTaskJtbdSelect();
     renderAgentInternalTaskWorkspace();
     syncFormsWithTask();
@@ -1176,52 +1160,6 @@ function renderAgentInternalTaskWorkspace() {
     text("agentInternalDocumentCount", `${(state.internalTaskDocuments || []).length} docs`);
 }
 
-function renderAgentAssignments() {
-    const container = el("agentAssignmentList");
-    if (!container) {
-        return;
-    }
-    const assignments = filteredAgentAssignments();
-    if (!assignments.length) {
-        container.className = "queue-stack empty-state";
-        container.textContent = "No routing assignments yet.";
-        return;
-    }
-    container.className = "queue-stack";
-    container.innerHTML = assignments.map((assignment) => `
-        <article class="task-card mapping-card">
-            <div class="bubble-meta">
-                <strong>${escapeHtml(assignment.assigned_group)}</strong>
-                <span class="badge">${escapeHtml(assignment.status)}</span>
-            </div>
-            <p class="task-supporting">${escapeHtml(assignment.assigned_agent || "Unassigned")} • ${formatDate(assignment.assigned_at)}</p>
-        </article>
-    `).join("");
-}
-
-function renderAgentHandlingSessions() {
-    const container = el("agentHandlingSessionList");
-    if (!container) {
-        return;
-    }
-    const sessions = filteredAgentHandlingSessions();
-    if (!sessions.length) {
-        container.className = "queue-stack empty-state";
-        container.textContent = "No handling sessions yet.";
-        return;
-    }
-    container.className = "queue-stack";
-    container.innerHTML = sessions.map((session) => `
-        <article class="task-card mapping-card">
-            <div class="bubble-meta">
-                <strong>${escapeHtml(session.assigned_group)}</strong>
-                <span class="badge">${session.end_at ? "Ended" : "Active"}</span>
-            </div>
-            <p class="task-supporting">${escapeHtml(session.assigned_agent || "Unassigned")} • ${formatDate(session.start_at)}${session.end_at ? ` to ${formatDate(session.end_at)}` : ""}</p>
-        </article>
-    `).join("");
-}
-
 function renderCustomerExperience() {
     const customerHeading = el("customerAppHeading");
     if (!customerHeading) {
@@ -1429,10 +1367,8 @@ function renderDocumentsFromList(containerId, documents, emptyCopy) {
 
 function syncFormsWithTask() {
     if (!state.currentTask) {
-        setFormValue("#patchForm [name='status']", "");
         return;
     }
-    setFormValue("#patchForm [name='status']", state.currentTask.status || "");
     setFormValue("#expertPatchForm [name='status']", state.currentTask.status || "");
     setFormValue("#expertPatchForm [name='assignedAgent']", state.currentTask.assigned_agent || "");
 }
@@ -1476,8 +1412,6 @@ function clearWorkspace() {
     if (state.view === "agent") {
         html("agentJtbdList", "No JTBDs on this customer yet.");
         html("agentTaskList", "No tasks on this customer yet.");
-        html("agentAssignmentList", "No routing assignments yet.");
-        html("agentHandlingSessionList", "No handling sessions yet.");
         text("timelineCount", "Select a customer to load the full conversation.");
         text("documentCount", "0 docs");
         text("agentReplyTargetNote", "Replies are added to the customer-visible conversation and anchored to the selected task when one is available.");
@@ -1890,22 +1824,6 @@ function filteredAgentDocuments() {
     const taskIds = new Set(filteredAgentTasks().map((task) => task.task_id));
     const jtbdIds = new Set(filteredAgentJtbds().map((jtbd) => jtbd.public_id));
     return all.filter((documentItem) => taskIds.has(documentItem.task_id) || (documentItem.customer_jtbd_id && jtbdIds.has(documentItem.customer_jtbd_id)));
-}
-
-function filteredAgentAssignments() {
-    const all = state.agentWorkspace?.assignments || [];
-    if (state.agentDomainFilter === "ALL") {
-        return all;
-    }
-    return all.filter((assignment) => humanizeDomain(assignment.assigned_group) === state.agentDomainFilter);
-}
-
-function filteredAgentHandlingSessions() {
-    const all = state.agentWorkspace?.handling_sessions || [];
-    if (state.agentDomainFilter === "ALL") {
-        return all;
-    }
-    return all.filter((session) => humanizeDomain(session.assigned_group) === state.agentDomainFilter);
 }
 
 async function refreshAgentInternalTaskWorkspace() {

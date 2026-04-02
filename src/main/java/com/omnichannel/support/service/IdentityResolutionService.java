@@ -53,16 +53,8 @@ public class IdentityResolutionService {
         try {
             linkRepository.saveAndFlush(link);
         } catch (DataIntegrityViolationException ex) {
-            Optional<CustomerIdentityLink> concurrent =
-                    linkRepository.findByIdentifierTypeAndIdentifierValue(type, normalized);
-            if (concurrent.isPresent()) {
-                if (concurrent.get().getCustomerId().equals(customerId)) {
-                    return;
-                }
-                throw new ValidationException(type.name() + " " + normalized + " is already linked to customer "
-                        + concurrent.get().getCustomerId());
-            }
-            throw ex;
+            throw new ValidationException(
+                    type.name() + " " + normalized + " could not be linked because it is already linked to another customer");
         }
     }
 
