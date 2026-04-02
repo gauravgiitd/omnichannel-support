@@ -184,6 +184,9 @@ public class CustomerRequestService {
 
     private Task latestOpenTask(RequestAggregate aggregate) {
         return aggregate.tasks.stream()
+                .filter(task -> aggregate.customerJtbd == null
+                        || (task.getCustomerJtbd() != null
+                        && task.getCustomerJtbd().getId().equals(aggregate.customerJtbd.getId())))
                 .filter(task -> !isClosed(task.getStatus()))
                 .max(Comparator.comparing(Task::getCreatedAt))
                 .orElse(null);
@@ -229,7 +232,10 @@ public class CustomerRequestService {
     private RequestAggregate buildConversationAggregate(String customerId, Conversation conversation) {
         List<Task> tasks = canonicalTasks(taskRepository.findByCustomerIdOrderByCreatedAtDesc(customerId), any());
         List<CustomerJtbd> customerJtbds = customerJtbdRepository.findByCustomerIdOrderByCreatedAtDesc(customerId);
-        CustomerJtbd displayJtbd = customerJtbds.stream()
+        CustomerJtbd activeConversationJtbd = customerConversationService.activeCustomerJtbd(conversation);
+        CustomerJtbd displayJtbd = activeConversationJtbd != null
+                ? activeConversationJtbd
+                : customerJtbds.stream()
                 .filter(jtbd -> jtbd.getStatus() != JtbdInstanceStatus.COMPLETED)
                 .findFirst()
                 .orElse(customerJtbds.isEmpty() ? null : customerJtbds.get(0));

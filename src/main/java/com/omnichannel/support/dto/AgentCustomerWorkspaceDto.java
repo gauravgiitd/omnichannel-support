@@ -11,6 +11,7 @@ public record AgentCustomerWorkspaceDto(
         List<String> emails,
         List<String> phones,
         String conversationId,
+        String activeCustomerJtbdId,
         ChannelType primaryChannel,
         String defaultTaskId,
         List<String> domains,

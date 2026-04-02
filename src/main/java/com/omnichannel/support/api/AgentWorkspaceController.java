@@ -3,8 +3,11 @@ package com.omnichannel.support.api;
 import com.omnichannel.support.dto.AgentCustomerWorkspaceDto;
 import com.omnichannel.support.dto.ApiResponse;
 import com.omnichannel.support.dto.CreateExpertTaskRequest;
+import com.omnichannel.support.dto.CreateCustomerJtbdRequest;
+import com.omnichannel.support.dto.CustomerJtbdDto;
 import com.omnichannel.support.dto.CustomerSummaryDto;
 import com.omnichannel.support.dto.DocumentDto;
+import com.omnichannel.support.dto.JtbdTypeDto;
 import com.omnichannel.support.dto.MessageDto;
 import com.omnichannel.support.dto.PostMessageRequest;
 import com.omnichannel.support.dto.RegisterDocumentRequest;
@@ -38,6 +41,11 @@ public class AgentWorkspaceController {
     @GetMapping("/customers")
     public ResponseEntity<ApiResponse<List<CustomerSummaryDto>>> listCustomers() {
         return ResponseEntity.ok(ApiResponse.success(agentWorkspaceService.listCustomers()));
+    }
+
+    @GetMapping("/jtbd-types")
+    public ResponseEntity<ApiResponse<List<JtbdTypeDto>>> listJtbdTypes() {
+        return ResponseEntity.ok(ApiResponse.success(agentWorkspaceService.listJtbdTypes()));
     }
 
     @GetMapping("/customers/{customerId}/workspace")
@@ -115,5 +123,29 @@ public class AgentWorkspaceController {
         AppUser user = authenticatedUserService.requireCurrentUser(authentication);
         TaskDto task = agentWorkspaceService.createExpertTask(customerId, user.email(), request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(task));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/jtbds", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<CustomerJtbdDto>> createConversationJtbd(
+            @PathVariable("customerId") String customerId,
+            @Valid @RequestBody CreateCustomerJtbdRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(agentWorkspaceService.createConversationJtbd(customerId, request)));
+    }
+
+    @PostMapping("/customers/{customerId}/jtbds/{customerJtbdId}/activate")
+    public ResponseEntity<ApiResponse<CustomerJtbdDto>> activateConversationJtbd(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("customerJtbdId") String customerJtbdId) {
+        return ResponseEntity.ok(ApiResponse.success(
+                agentWorkspaceService.activateConversationJtbd(customerId, customerJtbdId)));
+    }
+
+    @PostMapping("/customers/{customerId}/jtbds/{customerJtbdId}/complete")
+    public ResponseEntity<ApiResponse<CustomerJtbdDto>> completeConversationJtbd(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("customerJtbdId") String customerJtbdId) {
+        return ResponseEntity.ok(ApiResponse.success(
+                agentWorkspaceService.completeConversationJtbd(customerId, customerJtbdId)));
     }
 }

@@ -187,11 +187,16 @@ public class ConversationService {
 
     private MessageDto toDto(Message message) {
         java.util.Map<String, Object> meta = parseObjectMap(message.getMetadataJson());
+        List<String> jtbdTags = new java.util.ArrayList<>();
+        if (message.getCustomerJtbd() != null && message.getCustomerJtbd().getJtbdType() != null) {
+            jtbdTags.add(message.getCustomerJtbd().getJtbdType().getName());
+        }
         return new MessageDto(
                 message.getPublicId(),
                 message.getTask() != null ? message.getTask().getTaskNumber() : null,
                 message.getCustomerJtbd() != null ? message.getCustomerJtbd().getPublicId() : null,
                 message.getCustomerJtbd() != null ? message.getCustomerJtbd().getJtbdType().getName() : null,
+                jtbdTags.stream().distinct().toList(),
                 message.getChannel(),
                 message.getSenderType(),
                 message.getSenderIdentifier(),

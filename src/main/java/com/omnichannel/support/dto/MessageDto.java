@@ -14,6 +14,7 @@ public record MessageDto(
         String taskId,
         String customerJtbdId,
         String customerJtbdTypeName,
+        List<String> customerJtbdTags,
         ChannelType channel,
         SenderType senderType,
         String senderIdentifier,

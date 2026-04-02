@@ -12,6 +12,7 @@ import com.omnichannel.support.domain.TaskType;
 import com.omnichannel.support.dto.AgentAssignmentDto;
 import com.omnichannel.support.dto.AgentCustomerWorkspaceDto;
 import com.omnichannel.support.dto.CreateExpertTaskRequest;
+import com.omnichannel.support.dto.CreateCustomerJtbdRequest;
 import com.omnichannel.support.dto.CreateTaskRequest;
 import com.omnichannel.support.dto.CustomerJtbdDto;
 import com.omnichannel.support.dto.CustomerSummaryDto;
@@ -100,6 +101,7 @@ public class AgentWorkspaceService {
                 emails,
                 phones,
                 conversation.getPublicId(),
+                conversation.getActiveCustomerJtbdPublicId(),
                 conversation.getPrimaryChannel(),
                 defaultTaskId,
                 domains,
@@ -127,7 +129,12 @@ public class AgentWorkspaceService {
     @Transactional
     public MessageDto postConversationMessage(
             String customerId, String agentEmail, String taskId, PostMessageRequest request) {
+        Conversation conversation = requireConversation(customerId);
+        CustomerJtbd activeJtbd = activeJtbdForConversation(conversation);
         Task task = resolveTaskForCustomer(customerId, taskId);
+        if (activeJtbd != null) {
+            task = resolveTaskForActiveJtbd(activeJtbd, task);
+        }
         if (task != null) {
             return taskService.postMessage(
                     task.getTaskNumber(),
@@ -143,10 +150,9 @@ public class AgentWorkspaceService {
                                     ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER))));
         }
 
-        Conversation conversation = requireConversation(customerId);
         return conversationService.appendMessage(
                 conversation,
-                activeJtbdForCustomer(customerId),
+                activeJtbd,
                 null,
                 request.channel() != null ? request.channel() : conversation.getPrimaryChannel(),
                 SenderType.AGENT,
@@ -162,7 +168,12 @@ public class AgentWorkspaceService {
     @Transactional
     public DocumentDto registerConversationDocument(
             String customerId, String agentEmail, String taskId, RegisterDocumentRequest request) {
+        Conversation conversation = requireConversation(customerId);
+        CustomerJtbd activeJtbd = activeJtbdForConversation(conversation);
         Task task = resolveTaskForCustomer(customerId, taskId);
+        if (activeJtbd != null) {
+            task = resolveTaskForActiveJtbd(activeJtbd, task);
+        }
         if (task != null) {
             return taskService.registerDocument(
                     task.getTaskNumber(),
@@ -180,11 +191,9 @@ public class AgentWorkspaceService {
                                     ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER))));
         }
 
-        Conversation conversation = requireConversation(customerId);
-        CustomerJtbd customerJtbd = activeJtbdForCustomer(customerId);
         DocumentDto document = documentService.register(
                 conversation,
-                customerJtbd,
+                activeJtbd,
                 null,
                 customerId,
                 request.channel() != null ? request.channel() : conversation.getPrimaryChannel(),
@@ -197,7 +206,7 @@ public class AgentWorkspaceService {
                         ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER)));
         MessageDto message = conversationService.appendMessage(
                 conversation,
-                customerJtbd,
+                activeJtbd,
                 null,
                 request.channel() != null ? request.channel() : conversation.getPrimaryChannel(),
                 SenderType.AGENT,
@@ -215,9 +224,44 @@ public class AgentWorkspaceService {
                 documentService.getByPublicId(document.documentId()),
                 conversation,
                 messageRepository.findByPublicId(message.messageId()).orElse(null),
-                customerJtbd,
+                activeJtbd,
                 null);
         return document;
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.omnichannel.support.dto.JtbdTypeDto> listJtbdTypes() {
+        return jtbdService.listTypes();
+    }
+
+    @Transactional
+    public CustomerJtbdDto createConversationJtbd(String customerId, CreateCustomerJtbdRequest request) {
+        CustomerJtbdDto created = jtbdService.createCustomerJtbd(customerId, request);
+        Conversation conversation = requireConversation(customerId);
+        CustomerJtbd jtbd = jtbdService.loadCustomerJtbd(created.publicId());
+        customerConversationService.setActiveCustomerJtbd(conversation, jtbd);
+        return created;
+    }
+
+    @Transactional
+    public CustomerJtbdDto activateConversationJtbd(String customerId, String customerJtbdId) {
+        Conversation conversation = requireConversation(customerId);
+        CustomerJtbd jtbd = jtbdService.loadCustomerJtbd(customerJtbdId);
+        if (!customerId.equals(jtbd.getCustomerId())) {
+            throw new NotFoundException("jtbd not found on selected customer");
+        }
+        customerConversationService.setActiveCustomerJtbd(conversation, jtbd);
+        return jtbdService.toCustomerJtbdDtoView(jtbd);
+    }
+
+    @Transactional
+    public CustomerJtbdDto completeConversationJtbd(String customerId, String customerJtbdId) {
+        Conversation conversation = requireConversation(customerId);
+        CustomerJtbdDto completed = jtbdService.completeCustomerJtbd(customerJtbdId);
+        if (customerJtbdId.equals(conversation.getActiveCustomerJtbdPublicId())) {
+            customerConversationService.clearActiveCustomerJtbd(conversation);
+        }
+        return completed;
     }
 
     @Transactional(readOnly = true)
@@ -273,13 +317,10 @@ public class AgentWorkspaceService {
     @Transactional
     public com.omnichannel.support.dto.TaskDto createExpertTask(
             String customerId, String agentEmail, CreateExpertTaskRequest request) {
-        CustomerJtbd customerJtbd = null;
-        if (request.customerJtbdId() != null && !request.customerJtbdId().isBlank()) {
-            customerJtbd = customerJtbdRepository.findByPublicId(request.customerJtbdId())
-                    .orElseThrow(() -> new NotFoundException("jtbd not found"));
-            if (!customerId.equals(customerJtbd.getCustomerId())) {
-                throw new NotFoundException("jtbd not found on selected customer");
-            }
+        CustomerJtbd customerJtbd = customerJtbdRepository.findByPublicId(request.customerJtbdId())
+                .orElseThrow(() -> new NotFoundException("jtbd not found"));
+        if (!customerId.equals(customerJtbd.getCustomerId())) {
+            throw new NotFoundException("jtbd not found on selected customer");
         }
         Task seedTask = resolveTaskForCustomer(customerId, null);
         com.omnichannel.support.domain.ChannelType sourceChannel =
@@ -337,6 +378,24 @@ public class AgentWorkspaceService {
 
     private CustomerJtbd activeJtbdForCustomer(String customerId) {
         return jtbdService.activeJtbdsForCustomer(customerId).stream().findFirst().orElse(null);
+    }
+
+    private CustomerJtbd activeJtbdForConversation(Conversation conversation) {
+        return customerConversationService.activeCustomerJtbd(conversation);
+    }
+
+    private Task resolveTaskForActiveJtbd(CustomerJtbd customerJtbd, Task fallback) {
+        List<Task> openTasks = taskService.findOpenTasksForCustomer(customerJtbd.getCustomerId()).stream()
+                .filter(task -> task.getCustomerJtbd() != null && task.getCustomerJtbd().getId().equals(customerJtbd.getId()))
+                .sorted(Comparator.comparing(Task::getCreatedAt).reversed())
+                .toList();
+        if (!openTasks.isEmpty()) {
+            return openTasks.get(0);
+        }
+        if (fallback != null && fallback.getCustomerJtbd() != null && fallback.getCustomerJtbd().getId().equals(customerJtbd.getId())) {
+            return fallback;
+        }
+        return null;
     }
 
     private static String domainForTask(Task task) {

@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Size;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record CreateExpertTaskRequest(
-        @Size(max = 36) String customerJtbdId,
+        @NotBlank @Size(max = 36) String customerJtbdId,
         @NotBlank @Size(max = 128) String issueType,
         @Size(max = 64) String lob,
         @Size(max = 64) String claimId,

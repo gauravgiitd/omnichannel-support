@@ -35,6 +35,9 @@ public class Conversation {
     @Column(name = "primary_channel", nullable = false, length = 32)
     private ChannelType primaryChannel;
 
+    @Column(name = "active_customer_jtbd_public_id", length = 36)
+    private String activeCustomerJtbdPublicId;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 

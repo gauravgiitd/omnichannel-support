@@ -245,7 +245,7 @@ function bindForms() {
         const response = await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/expert-tasks`, {
             method: "POST",
             body: {
-                customer_jtbd_id: blankOrNull(data.get("customerJtbdId")),
+                customer_jtbd_id: data.get("customerJtbdId"),
                 issue_type: data.get("issueType"),
                 assigned_queue: data.get("assignedQueue"),
                 priority: data.get("priority"),
@@ -253,6 +253,20 @@ function bindForms() {
             }
         });
         pushEvent("Expert task created", `${response.data.task_id} was created for explicit domain-expert handling.`);
+        event.currentTarget.reset();
+        await refreshBoard(state.agentCustomerFilter);
+    });
+
+    bindSubmit("agentCreateJtbdForm", async (event) => {
+        ensureAgentCustomerSelected();
+        const data = new FormData(event.currentTarget);
+        const response = await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/jtbds`, {
+            method: "POST",
+            body: {
+                jtbd_type_id: data.get("jtbdTypeId")
+            }
+        });
+        pushEvent("JTBD created", `${response.data.jtbd_type_name} is now active in this conversation.`);
         event.currentTarget.reset();
         await refreshBoard(state.agentCustomerFilter);
     });
@@ -457,8 +471,12 @@ async function refreshBoard(preferredTaskId) {
         const customerResponse = await api("/v1/customers/me/requests");
         state.customerRequests = customerResponse.data;
     } else if (state.view === "agent") {
-        const response = await api("/v1/agent/customers");
-        state.agentCustomers = response.data;
+        const [customerResponse, jtbdTypeResponse] = await Promise.all([
+            api("/v1/agent/customers"),
+            api("/v1/agent/jtbd-types")
+        ]);
+        state.agentCustomers = customerResponse.data;
+        state.jtbdTypes = jtbdTypeResponse.data;
     } else if (state.view === "expert") {
         const response = await api("/v1/expert/tasks");
         state.tasks = response.data;
@@ -621,6 +639,7 @@ async function selectAgentCustomer(customerId) {
     populateAgentCustomerFilter();
     populateAgentDomainFilter();
     populateAgentExpertTaskJtbdSelect();
+    populateAgentJtbdTypeSelect();
     renderMetrics();
     renderAgentCustomerList();
     await refreshAgentInternalTaskWorkspace();
@@ -919,6 +938,7 @@ function renderAgentWorkspace() {
     if (meta) {
         meta.innerHTML = [
             badge(state.agentWorkspace.primary_channel || "UI"),
+            state.agentWorkspace.active_customer_jtbd_id ? badge(`Active JTBD ${state.agentWorkspace.active_customer_jtbd_id}`) : badge("No active JTBD"),
             badge(`${filteredAgentJtbds().length} JTBDs`),
             badge(`${filteredAgentTasks().length} tasks`),
             state.selectedTaskId ? badge(`Reply target ${state.selectedTaskId}`) : badge("No task selected")
@@ -1022,12 +1042,23 @@ function populateAgentExpertTaskJtbdSelect() {
         return;
     }
     const jtbds = state.agentWorkspace?.jtbds || [];
+    select.innerHTML = jtbds.map((jtbd) => `<option value="${escapeHtml(jtbd.public_id)}">${escapeHtml(jtbd.jtbd_type_name)} • ${escapeHtml(jtbd.current_stage_name || jtbd.status || "Active")}</option>`).join("");
+    const selectedJtbdId = state.agentWorkspace?.active_customer_jtbd_id || state.currentTask?.customer_jtbd_id || "";
+    select.value = jtbds.some((jtbd) => jtbd.public_id === selectedJtbdId)
+        ? selectedJtbdId
+        : (jtbds[0]?.public_id || "");
+}
+
+function populateAgentJtbdTypeSelect() {
+    const select = el("agentJtbdTypeSelect");
+    if (!select) {
+        return;
+    }
+    const types = state.jtbdTypes || [];
     select.innerHTML = `
-        <option value="">No JTBD selected</option>
-        ${jtbds.map((jtbd) => `<option value="${escapeHtml(jtbd.public_id)}">${escapeHtml(jtbd.jtbd_type_name)} • ${escapeHtml(jtbd.current_stage_name || jtbd.status || "Active")}</option>`).join("")}
+        <option value="">Choose JTBD type</option>
+        ${types.map((type) => `<option value="${escapeHtml(type.public_id)}">${escapeHtml(type.name)}</option>`).join("")}
     `;
-    const selectedJtbdId = state.currentTask?.customer_jtbd_id || "";
-    select.value = jtbds.some((jtbd) => jtbd.public_id === selectedJtbdId) ? selectedJtbdId : "";
 }
 
 function populateAgentDomainFilter() {
@@ -1091,9 +1122,23 @@ function renderAgentJtbds() {
                 <strong>${escapeHtml(jtbd.jtbd_type_name)}</strong>
                 <span class="badge">${escapeHtml(jtbd.status)}</span>
             </div>
-            <p class="task-supporting">${escapeHtml(jtbd.current_stage_name)} • ${escapeHtml(jtbd.public_id)}</p>
+            <div class="bubble-meta">
+                <span class="badge">${escapeHtml(jtbd.current_stage_name)}</span>
+                ${state.agentWorkspace?.active_customer_jtbd_id === jtbd.public_id ? badge("Active in conversation") : ""}
+            </div>
+            <p class="task-supporting">${escapeHtml(jtbd.public_id)}</p>
+            <div class="actions-inline">
+                <button type="button" class="ghost-button agent-jtbd-activate" data-customer-jtbd-id="${jtbd.public_id}">Set active</button>
+                ${jtbd.status !== "COMPLETED" ? `<button type="button" class="ghost-button agent-jtbd-complete" data-customer-jtbd-id="${jtbd.public_id}">Complete</button>` : ""}
+            </div>
         </article>
     `).join("");
+    container.querySelectorAll(".agent-jtbd-activate").forEach((button) => {
+        button.addEventListener("click", () => activateAgentJtbd(button.dataset.customerJtbdId).catch(handleError));
+    });
+    container.querySelectorAll(".agent-jtbd-complete").forEach((button) => {
+        button.addEventListener("click", () => completeAgentJtbd(button.dataset.customerJtbdId).catch(handleError));
+    });
 }
 
 function renderAgentTasks() {
@@ -1270,9 +1315,11 @@ function buildMessageNode(message, customerView) {
                 : "system";
     node.classList.add(senderClass);
     const senderMeta = renderSenderMeta(message, customerView);
+    const jtbdTags = (message.customer_jtbd_tags || []).map((tag) => badge(`JTBD ${tag}`));
     node.querySelector(".bubble-meta").innerHTML = [
         badge(channelLabel(message.channel)),
         badge(senderMeta.badge),
+        ...jtbdTags,
         `<span class="small-note">${escapeHtml(senderMeta.detail)}</span>`,
         `<span class="small-note">${formatDate(message.created_at)}</span>`
     ].join("");
@@ -1369,8 +1416,11 @@ function renderDocumentsFromList(containerId, documents, emptyCopy) {
     documents.forEach((documentItem) => {
         const node = template.content.firstElementChild.cloneNode(true);
         node.querySelector(".document-type").textContent = documentItem.document_type;
+        const jtbdCopy = (documentItem.customer_jtbd_tags || []).length
+            ? (documentItem.customer_jtbd_tags || []).map((tag) => `JTBD ${tag}`).join(" • ")
+            : (documentItem.customer_jtbd_type_name || "General");
         node.querySelector(".document-meta").textContent =
-            `${channelLabel(documentItem.source_channel)} • ${documentItem.customer_jtbd_type_name || "General"} • ${documentItem.policy_id || "No policy"} • ${documentItem.claim_id || "No claim"}`;
+            `${channelLabel(documentItem.source_channel)} • ${jtbdCopy} • ${documentItem.policy_id || "No policy"} • ${documentItem.claim_id || "No claim"}`;
         const link = node.querySelector(".document-link");
         link.href = documentItem.file_url;
         container.appendChild(node);
@@ -1875,6 +1925,24 @@ async function refreshAgentInternalTaskWorkspace() {
         state.internalTaskMessages = [];
         state.internalTaskDocuments = [];
     }
+}
+
+async function activateAgentJtbd(customerJtbdId) {
+    ensureAgentCustomerSelected();
+    await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/jtbds/${encodeURIComponent(customerJtbdId)}/activate`, {
+        method: "POST"
+    });
+    pushEvent("JTBD activated", `${customerJtbdId} is now the active JTBD for this conversation.`);
+    await refreshBoard(state.agentCustomerFilter);
+}
+
+async function completeAgentJtbd(customerJtbdId) {
+    ensureAgentCustomerSelected();
+    await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/jtbds/${encodeURIComponent(customerJtbdId)}/complete`, {
+        method: "POST"
+    });
+    pushEvent("JTBD completed", `${customerJtbdId} was completed explicitly for this conversation.`);
+    await refreshBoard(state.agentCustomerFilter);
 }
 
 function domainForTask(task) {

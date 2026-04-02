@@ -170,11 +170,16 @@ public class DocumentService {
     }
 
     private DocumentDto toDto(TaskDocument doc) {
+        List<String> jtbdTags = new java.util.ArrayList<>();
+        if (doc.getCustomerJtbd() != null && doc.getCustomerJtbd().getJtbdType() != null) {
+            jtbdTags.add(doc.getCustomerJtbd().getJtbdType().getName());
+        }
         return new DocumentDto(
                 doc.getPublicId(),
                 doc.getTask() != null ? doc.getTask().getTaskNumber() : null,
                 doc.getCustomerJtbd() != null ? doc.getCustomerJtbd().getPublicId() : null,
                 doc.getCustomerJtbd() != null ? doc.getCustomerJtbd().getJtbdType().getName() : null,
+                jtbdTags.stream().distinct().toList(),
                 doc.getCustomerId(),
                 doc.getClaimId(),
                 doc.getPolicyId(),

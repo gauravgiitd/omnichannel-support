@@ -216,6 +216,16 @@ public class JtbdService {
     }
 
     @Transactional
+    public CustomerJtbdDto completeCustomerJtbd(String publicId) {
+        CustomerJtbd instance = loadCustomerJtbd(publicId);
+        JtbdTypeStage terminalStage = jtbdTypeStageRepository.findByJtbdTypeOrderByStageOrderAsc(instance.getJtbdType()).stream()
+                .filter(JtbdTypeStage::isTerminalCompleted)
+                .findFirst()
+                .orElseThrow(() -> new ValidationException("JTBD type does not have a terminal completed stage"));
+        return updateCustomerJtbd(publicId, new UpdateCustomerJtbdRequest(terminalStage.getStageKey()));
+    }
+
+    @Transactional
     public void deleteCustomerJtbd(String publicId) {
         CustomerJtbd instance = loadCustomerJtbd(publicId);
         boolean hasTasks = taskRepository.findAll().stream()
@@ -231,6 +241,11 @@ public class JtbdService {
     public CustomerJtbd loadCustomerJtbd(String publicId) {
         return customerJtbdRepository.findByPublicId(publicId)
                 .orElseThrow(() -> new NotFoundException("customer JTBD not found"));
+    }
+
+    @Transactional(readOnly = true)
+    public CustomerJtbdDto toCustomerJtbdDtoView(CustomerJtbd instance) {
+        return toCustomerJtbdDto(instance);
     }
 
     private void closeTasksForCompletedJtbd(CustomerJtbd instance) {
