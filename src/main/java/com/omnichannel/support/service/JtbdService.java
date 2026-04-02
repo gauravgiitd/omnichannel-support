@@ -131,6 +131,10 @@ public class JtbdService {
         });
 
         return customers.values().stream()
+                .filter(acc -> acc.taskCount > 0
+                        || acc.activeJtbdCount > 0
+                        || !acc.emails.isEmpty()
+                        || !acc.phones.isEmpty())
                 .sorted(Comparator.comparing(CustomerAccumulator::customerId))
                 .map(CustomerAccumulator::toDto)
                 .toList();
