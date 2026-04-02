@@ -7,6 +7,7 @@ import com.omnichannel.support.domain.ExecutionTier;
 import com.omnichannel.support.domain.IdentifierType;
 import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.Task;
+import com.omnichannel.support.domain.TaskPriority;
 import com.omnichannel.support.domain.TaskStatus;
 import com.omnichannel.support.domain.TaskType;
 import com.omnichannel.support.dto.AgentAssignmentDto;
@@ -255,6 +256,19 @@ public class AgentWorkspaceService {
     }
 
     @Transactional
+    public CustomerJtbdDto deactivateConversationJtbd(String customerId, String customerJtbdId) {
+        Conversation conversation = requireConversation(customerId);
+        CustomerJtbd jtbd = jtbdService.loadCustomerJtbd(customerJtbdId);
+        if (!customerId.equals(jtbd.getCustomerId())) {
+            throw new NotFoundException("jtbd not found on selected customer");
+        }
+        if (customerJtbdId.equals(conversation.getActiveCustomerJtbdPublicId())) {
+            customerConversationService.clearActiveCustomerJtbd(conversation);
+        }
+        return jtbdService.toCustomerJtbdDtoView(jtbd);
+    }
+
+    @Transactional
     public CustomerJtbdDto completeConversationJtbd(String customerId, String customerJtbdId) {
         Conversation conversation = requireConversation(customerId);
         CustomerJtbdDto completed = jtbdService.completeCustomerJtbd(customerJtbdId);
@@ -325,14 +339,21 @@ public class AgentWorkspaceService {
         Task seedTask = resolveTaskForCustomer(customerId, null);
         com.omnichannel.support.domain.ChannelType sourceChannel =
                 seedTask != null ? seedTask.getSourceChannel() : requireConversation(customerId).getPrimaryChannel();
+        String issueType = request.issueType() != null && !request.issueType().isBlank()
+                ? request.issueType().trim()
+                : customerJtbd.getJtbdType().getName() + " task";
+        String assignedQueue = request.assignedQueue() != null && !request.assignedQueue().isBlank()
+                ? request.assignedQueue().trim()
+                : "queue-expert-work";
+        TaskPriority priority = request.priority() != null ? request.priority() : TaskPriority.MEDIUM;
         Task created = taskService.createInternalTask(
                 new CreateTaskRequest(
                         customerId,
-                        request.issueType(),
+                        issueType,
                         request.lob(),
                         request.claimId(),
                         request.policyId(),
-                        request.priority(),
+                        priority,
                         sourceChannel,
                         request.body(),
                         agentEmail,
@@ -343,7 +364,7 @@ public class AgentWorkspaceService {
                 customerJtbd,
                 TaskType.EXPERT_TASK,
                 ExecutionTier.EXPERT,
-                request.assignedQueue());
+                assignedQueue);
         return taskService.toDtoView(created);
     }
 

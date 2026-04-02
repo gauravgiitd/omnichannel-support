@@ -13,6 +13,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 @Service
 @RequiredArgsConstructor
@@ -31,12 +34,14 @@ public class AuthenticatedUserService {
             throw new ValidationException("Google account email is required");
         }
 
-        String customerId = resolveOrProvisionCustomer(email);
-
         Set<String> roles = new LinkedHashSet<>();
         for (GrantedAuthority authority : authentication.getAuthorities()) {
             roles.add(authority.getAuthority());
         }
+
+        String customerId = shouldProvisionCustomerIdentity(roles)
+                ? resolveOrProvisionCustomer(email)
+                : resolveExistingCustomer(email).orElse(null);
 
         return new AppUser(email, oidcUser.getFullName(), oidcUser.getPicture(), customerId, roles);
     }
@@ -48,10 +53,19 @@ public class AuthenticatedUserService {
     }
 
     private String resolveOrProvisionCustomer(String email) {
+        Optional<String> existing = resolveExistingCustomer(email);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        return provisionCustomer(email);
+    }
+
+    private Optional<String> resolveExistingCustomer(String email) {
         Optional<String> direct = identityResolutionService.resolveCustomerId(IdentifierType.EMAIL, email);
         if (direct.isPresent()) {
             linkMappedPhoneIfPresent(direct.get(), email);
-            return direct.get();
+            return direct;
         }
 
         Optional<String> mappedPhone = customerContactMappingService.counterpartForEmail(email);
@@ -60,11 +74,11 @@ public class AuthenticatedUserService {
                     identityResolutionService.resolveCustomerId(IdentifierType.PHONE, mappedPhone.get());
             if (mappedCustomer.isPresent()) {
                 identityResolutionService.registerLink(mappedCustomer.get(), IdentifierType.EMAIL, email);
-                return mappedCustomer.get();
+                return mappedCustomer;
             }
         }
 
-        return provisionCustomer(email);
+        return Optional.empty();
     }
 
     private void linkMappedPhoneIfPresent(String customerId, String email) {
@@ -86,6 +100,24 @@ public class AuthenticatedUserService {
 
     public boolean isStaff(Authentication authentication) {
         return isAgent(authentication) || isExpert(authentication) || isAdmin(authentication);
+    }
+
+    private boolean shouldProvisionCustomerIdentity(Set<String> roles) {
+        if (!(roles.contains("ROLE_AGENT") || roles.contains("ROLE_EXPERT") || roles.contains("ROLE_ADMIN"))) {
+            return true;
+        }
+        String path = currentRequestPath().orElse("");
+        return path.startsWith("/v1/customers/me")
+                || path.startsWith("/v1/tasks/me")
+                || path.startsWith("/v1/inbound");
+    }
+
+    private Optional<String> currentRequestPath() {
+        RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
+        if (attributes instanceof ServletRequestAttributes servletRequestAttributes) {
+            return Optional.ofNullable(servletRequestAttributes.getRequest().getRequestURI());
+        }
+        return Optional.empty();
     }
 
     private boolean hasRole(Authentication authentication, String role) {

@@ -141,6 +141,14 @@ public class AgentWorkspaceController {
                 agentWorkspaceService.activateConversationJtbd(customerId, customerJtbdId)));
     }
 
+    @PostMapping("/customers/{customerId}/jtbds/{customerJtbdId}/deactivate")
+    public ResponseEntity<ApiResponse<CustomerJtbdDto>> deactivateConversationJtbd(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("customerJtbdId") String customerJtbdId) {
+        return ResponseEntity.ok(ApiResponse.success(
+                agentWorkspaceService.deactivateConversationJtbd(customerId, customerJtbdId)));
+    }
+
     @PostMapping("/customers/{customerId}/jtbds/{customerJtbdId}/complete")
     public ResponseEntity<ApiResponse<CustomerJtbdDto>> completeConversationJtbd(
             @PathVariable("customerId") String customerId,

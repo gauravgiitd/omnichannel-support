@@ -119,83 +119,9 @@
 
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Visible JTBDs</h4>
+                                <h4>JTBD and task workspace</h4>
                             </div>
                             <div id="agentJtbdList" class="queue-stack empty-state">No JTBDs on this customer yet.</div>
-                        </div>
-
-                        <div class="subpanel">
-                            <div class="subpanel-head">
-                                <h4>Visible tasks</h4>
-                            </div>
-                            <div id="agentTaskList" class="queue-stack empty-state">No tasks on this customer yet.</div>
-                        </div>
-
-                        <div class="subpanel">
-                            <div class="subpanel-head">
-                                <h4>Create expert task</h4>
-                            </div>
-                            <form id="expertTaskCreateForm" class="stack-form compact">
-                                <p class="small-note">Use this when domain-expert execution is required. The handoff stays internal and off the customer surface.</p>
-                                <label>
-                                    Linked JTBD
-                                    <select name="customerJtbdId" id="agentExpertTaskJtbdSelect">
-                                        <option value="">No JTBD selected</option>
-                                    </select>
-                                </label>
-                                <label>
-                                    Expert group
-                                    <select name="assignedQueue">
-                                        <option value="queue-claims-expert">Claims expert</option>
-                                        <option value="queue-policy-expert">Policy expert</option>
-                                        <option value="queue-billing-expert">Billing expert</option>
-                                        <option value="queue-health-expert">Health expert</option>
-                                        <option value="queue-travel-expert">Travel expert</option>
-                                    </select>
-                                </label>
-                                <label>
-                                    Task summary
-                                    <input name="issueType" type="text" maxlength="128" placeholder="What should the expert do?" required>
-                                </label>
-                                <label>
-                                    Priority
-                                    <select name="priority">
-                                        <option value="LOW">LOW</option>
-                                        <option value="MEDIUM" selected>MEDIUM</option>
-                                        <option value="HIGH">HIGH</option>
-                                        <option value="URGENT">URGENT</option>
-                                    </select>
-                                </label>
-                                <label>
-                                    Internal handoff note
-                                    <textarea name="body" rows="4" required>Please review the latest request details and continue the execution work on this task.</textarea>
-                                </label>
-                                <button type="submit">Create expert task</button>
-                            </form>
-                        </div>
-
-                        <div class="subpanel">
-                            <div class="subpanel-head">
-                                <h4>Internal task collaboration</h4>
-                            </div>
-                            <p class="small-note" id="agentInternalTaskNote">Select a task to see the internal agent and expert discussion for that task.</p>
-                            <div id="agentInternalMessageTimeline" class="chat-thread empty-state">Select a task to load internal task notes.</div>
-                            <div class="subpanel-head">
-                                <h4>Internal task documents</h4>
-                                <span id="agentInternalDocumentCount" class="small-note">0 docs</span>
-                            </div>
-                            <div id="agentInternalDocumentList" class="document-list empty-state">Internal task attachments appear here.</div>
-                            <form id="agentInternalTaskForm" class="stack-form compact customer-compose-form">
-                                <label>
-                                    Internal note
-                                    <textarea name="body" rows="4" required>Adding an internal update for the selected task.</textarea>
-                                </label>
-                                <label>
-                                    Attach internal documents
-                                    <input name="attachments" type="file" multiple>
-                                </label>
-                                <button type="submit">Save internal task update</button>
-                            </form>
                         </div>
                     </div>
                 </div>

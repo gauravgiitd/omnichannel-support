@@ -225,24 +225,6 @@ function bindForms() {
         await refreshBoard(state.selectedTaskId);
     });
 
-    bindSubmit("expertTaskCreateForm", async (event) => {
-        ensureAgentCustomerSelected();
-        const data = new FormData(event.currentTarget);
-        const response = await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/expert-tasks`, {
-            method: "POST",
-            body: {
-                customer_jtbd_id: data.get("customerJtbdId"),
-                issue_type: data.get("issueType"),
-                assigned_queue: data.get("assignedQueue"),
-                priority: data.get("priority"),
-                body: data.get("body")
-            }
-        });
-        pushEvent("Expert task created", `${response.data.task_id} was created for explicit domain-expert handling.`);
-        event.currentTarget.reset();
-        await refreshBoard(state.agentCustomerFilter);
-    });
-
     bindSubmit("agentCreateJtbdForm", async (event) => {
         ensureAgentCustomerSelected();
         const data = new FormData(event.currentTarget);
@@ -312,49 +294,6 @@ function bindForms() {
 
         pushEvent("Expert task updated", `${response.data.task_id} is now ${response.data.status || "updated"}.`);
         await refreshBoard(response.data.task_id);
-    });
-
-    bindSubmit("agentInternalTaskForm", async (event) => {
-        ensureAgentCustomerSelected();
-        ensureTaskSelected();
-        const data = new FormData(event.currentTarget);
-        const body = data.get("body");
-        const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
-
-        await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/tasks/${encodeURIComponent(state.selectedTaskId)}/messages`, {
-            method: "POST",
-            body: {
-                channel: "UI",
-                sender_type: "AGENT",
-                sender_identifier: state.user.email,
-                body,
-                attachment_urls: [],
-                metadata: { source: "agent_internal_task_workspace" }
-            }
-        });
-
-        for (const file of uploadedFiles) {
-            await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/tasks/${encodeURIComponent(state.selectedTaskId)}/documents`, {
-                method: "POST",
-                body: {
-                    channel: "UI",
-                    sender_type: "AGENT",
-                    sender_identifier: state.user.email,
-                    file_url: file.file_token,
-                    document_type: "agent_internal_attachment",
-                    message_body: "Agent attached an internal task document.",
-                    metadata: {
-                        source: "agent_internal_task_workspace_upload",
-                        drive_file_id: driveFileIdFromToken(file.file_token),
-                        file_name: file.file_name,
-                        mime_type: file.mime_type
-                    }
-                }
-            });
-        }
-
-        pushEvent("Internal task updated", `The internal note was added to ${state.selectedTaskId} and stays off the customer view.`);
-        await refreshBoard(state.agentCustomerFilter);
     });
 
     bindSubmit("adminCleanupForm", async (event) => {
@@ -456,6 +395,10 @@ async function refreshBoard(preferredTaskId) {
     if (state.view === "customer") {
         const customerResponse = await api("/v1/customers/me/requests");
         state.customerRequests = customerResponse.data;
+        if (state.selectedRequestId && !state.customerRequests.some((request) => request.request_id === state.selectedRequestId)) {
+            persistRequestId(null);
+            state.currentRequest = null;
+        }
     } else if (state.view === "agent") {
         const [customerResponse, jtbdTypeResponse] = await Promise.all([
             api("/v1/agent/customers"),
@@ -624,7 +567,6 @@ async function selectAgentCustomer(customerId) {
     state.currentTask = (state.tasks || []).find((task) => task.task_id === state.selectedTaskId) || null;
     populateAgentCustomerFilter();
     populateAgentDomainFilter();
-    populateAgentExpertTaskJtbdSelect();
     populateAgentJtbdTypeSelect();
     renderMetrics();
     renderAgentCustomerList();
@@ -944,9 +886,6 @@ function renderAgentWorkspace() {
     renderChatThread("messageTimeline", filteredMessages, false);
     renderDocumentsFromList("documentList", filteredDocuments, "Documents shared from any channel appear here.");
     renderAgentJtbds();
-    renderAgentTasks();
-    populateAgentExpertTaskJtbdSelect();
-    renderAgentInternalTaskWorkspace();
     syncFormsWithTask();
     text(
         "agentReplyTargetNote",
@@ -1020,19 +959,6 @@ function populateAgentCustomerFilter() {
     state.agentCustomerFilter = select.value;
 }
 
-function populateAgentExpertTaskJtbdSelect() {
-    const select = el("agentExpertTaskJtbdSelect");
-    if (!select) {
-        return;
-    }
-    const jtbds = state.agentWorkspace?.jtbds || [];
-    select.innerHTML = jtbds.map((jtbd) => `<option value="${escapeHtml(jtbd.public_id)}">${escapeHtml(jtbd.jtbd_type_name)} • ${escapeHtml(jtbd.current_stage_name || jtbd.status || "Active")}</option>`).join("");
-    const selectedJtbdId = state.agentWorkspace?.active_customer_jtbd_id || state.currentTask?.customer_jtbd_id || "";
-    select.value = jtbds.some((jtbd) => jtbd.public_id === selectedJtbdId)
-        ? selectedJtbdId
-        : (jtbds[0]?.public_id || "");
-}
-
 function populateAgentJtbdTypeSelect() {
     const select = el("agentJtbdTypeSelect");
     if (!select) {
@@ -1101,7 +1027,7 @@ function renderAgentJtbds() {
     }
     container.className = "queue-stack";
     container.innerHTML = jtbds.map((jtbd) => `
-        <article class="task-card mapping-card customer-jtbd-card">
+        <article class="task-card mapping-card customer-jtbd-card expanded">
             <div class="bubble-meta">
                 <strong>${escapeHtml(jtbd.jtbd_type_name)}</strong>
                 <span class="badge">${escapeHtml(jtbd.status)}</span>
@@ -1113,32 +1039,48 @@ function renderAgentJtbds() {
             <p class="task-supporting">${escapeHtml(jtbd.public_id)}</p>
             <div class="actions-inline">
                 <button type="button" class="ghost-button agent-jtbd-activate" data-customer-jtbd-id="${jtbd.public_id}">Set active</button>
+                ${state.agentWorkspace?.active_customer_jtbd_id === jtbd.public_id ? `<button type="button" class="ghost-button agent-jtbd-deactivate" data-customer-jtbd-id="${jtbd.public_id}">Deactivate</button>` : ""}
                 ${jtbd.status !== "COMPLETED" ? `<button type="button" class="ghost-button agent-jtbd-complete" data-customer-jtbd-id="${jtbd.public_id}">Complete</button>` : ""}
+            </div>
+            <div class="queue-stack">
+                <form class="stack-form compact agent-jtbd-task-create-form" data-customer-jtbd-id="${jtbd.public_id}">
+                    <label>
+                        Create task inside this JTBD
+                        <textarea name="body" rows="3" required>Please continue the internal work needed for this JTBD.</textarea>
+                    </label>
+                    <button type="submit">Create task</button>
+                </form>
+                <div class="queue-stack">
+                    <div class="bubble-meta">
+                        <strong>Tasks in this JTBD</strong>
+                        <span class="badge">${tasksForAgentJtbd(jtbd.public_id).length}</span>
+                    </div>
+                    ${renderAgentJtbdTaskList(jtbd.public_id)}
+                </div>
+                ${renderSelectedAgentTaskDetail(jtbd.public_id)}
             </div>
         </article>
     `).join("");
     container.querySelectorAll(".agent-jtbd-activate").forEach((button) => {
         button.addEventListener("click", () => activateAgentJtbd(button.dataset.customerJtbdId).catch(handleError));
     });
+    container.querySelectorAll(".agent-jtbd-deactivate").forEach((button) => {
+        button.addEventListener("click", () => deactivateAgentJtbd(button.dataset.customerJtbdId).catch(handleError));
+    });
     container.querySelectorAll(".agent-jtbd-complete").forEach((button) => {
         button.addEventListener("click", () => completeAgentJtbd(button.dataset.customerJtbdId).catch(handleError));
     });
-}
-
-function renderAgentTasks() {
-    const container = el("agentTaskList");
-    if (!container) {
-        return;
-    }
-    const tasks = filteredAgentTasks();
-    if (!tasks.length) {
-        container.className = "queue-stack empty-state";
-        container.textContent = "No tasks on this customer yet.";
-        return;
-    }
-    container.className = "queue-stack";
-    container.innerHTML = tasks.map(renderTaskCard).join("");
-    container.querySelectorAll(".task-card").forEach((card) => {
+    container.querySelectorAll(".agent-jtbd-task-create-form").forEach((form) => {
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            try {
+                await createAgentTaskForJtbd(form.dataset.customerJtbdId, event.currentTarget);
+            } catch (error) {
+                handleError(error);
+            }
+        });
+    });
+    container.querySelectorAll(".agent-task-select").forEach((card) => {
         card.addEventListener("click", async () => {
             persistTaskId(card.dataset.taskId);
             state.currentTask = (state.tasks || []).find((task) => task.task_id === card.dataset.taskId) || null;
@@ -1146,18 +1088,142 @@ function renderAgentTasks() {
             renderAgentWorkspace();
         });
     });
+    container.querySelectorAll(".agent-internal-task-form").forEach((form) => {
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            try {
+                await submitAgentInternalTaskForm(form.dataset.taskId, event.currentTarget);
+            } catch (error) {
+                handleError(error);
+            }
+        });
+    });
+    container.querySelectorAll("[data-agent-task-detail]").forEach((detail) => {
+        const taskId = detail.dataset.agentTaskDetail;
+        const timeline = detail.querySelector("[data-agent-task-message-timeline]");
+        const docs = detail.querySelector("[data-agent-task-document-list]");
+        const note = detail.querySelector("[data-agent-task-note]");
+        const count = detail.querySelector("[data-agent-task-document-count]");
+        if (note) {
+            note.textContent = `Internal task conversation for ${taskId}. This remains off the customer view.`;
+        }
+        renderChatThreadInElement(timeline, state.internalTaskMessages || [], false);
+        renderDocumentsInElement(docs, state.internalTaskDocuments || [], "Internal task attachments appear here.");
+        if (count) {
+            count.textContent = `${(state.internalTaskDocuments || []).length} docs`;
+        }
+    });
 }
 
-function renderAgentInternalTaskWorkspace() {
-    text(
-        "agentInternalTaskNote",
-        state.selectedTaskId
-            ? `Internal agent and expert collaboration for ${state.selectedTaskId}. This does not appear in the customer view.`
-            : "Select a task to see the internal agent and expert discussion for that task."
-    );
-    renderChatThread("agentInternalMessageTimeline", state.internalTaskMessages || [], false);
-    renderDocumentsFromList("agentInternalDocumentList", state.internalTaskDocuments || [], "Internal task attachments appear here.");
-    text("agentInternalDocumentCount", `${(state.internalTaskDocuments || []).length} docs`);
+function tasksForAgentJtbd(customerJtbdId) {
+    return filteredAgentTasks().filter((task) => task.customer_jtbd_id === customerJtbdId);
+}
+
+function renderAgentJtbdTaskList(customerJtbdId) {
+    const tasks = tasksForAgentJtbd(customerJtbdId);
+    if (!tasks.length) {
+        return `<div class="empty-state">No tasks in this JTBD yet.</div>`;
+    }
+    return tasks.map((task) => {
+        const active = state.selectedTaskId === task.task_id ? " agent-task-select active" : " agent-task-select";
+        return renderTaskCard(task).replace('task-card ', `task-card${active}`);
+    }).join("");
+}
+
+function renderSelectedAgentTaskDetail(customerJtbdId) {
+    if (!state.currentTask || state.currentTask.customer_jtbd_id !== customerJtbdId) {
+        return "";
+    }
+    return `
+        <div class="subpanel" data-agent-task-detail="${state.currentTask.task_id}">
+            <div class="subpanel-head">
+                <h4>Selected task ${escapeHtml(state.currentTask.task_id)}</h4>
+                <div class="task-meta">
+                    ${badge(state.currentTask.status || "OPEN")}
+                    ${badge(state.currentTask.execution_tier || "INTERNAL")}
+                </div>
+            </div>
+            <p class="small-note" data-agent-task-note>Select a task to see the internal agent and expert discussion for that task.</p>
+            <div class="chat-thread empty-state" data-agent-task-message-timeline>Select a task to load internal task notes.</div>
+            <div class="subpanel-head">
+                <h4>Task documents</h4>
+                <span class="small-note" data-agent-task-document-count>0 docs</span>
+            </div>
+            <div class="document-list empty-state" data-agent-task-document-list>Internal task attachments appear here.</div>
+            <form class="stack-form compact customer-compose-form agent-internal-task-form" data-task-id="${escapeHtml(state.currentTask.task_id)}">
+                <label>
+                    Internal note
+                    <textarea name="body" rows="4" required>Adding an internal update for the selected task.</textarea>
+                </label>
+                <label>
+                    Attach internal documents
+                    <input name="attachments" type="file" multiple>
+                </label>
+                <button type="submit">Save internal task update</button>
+            </form>
+        </div>
+    `;
+}
+
+async function createAgentTaskForJtbd(customerJtbdId, formElement) {
+    ensureAgentCustomerSelected();
+    const data = new FormData(formElement);
+    const response = await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/expert-tasks`, {
+        method: "POST",
+        body: {
+            customer_jtbd_id: customerJtbdId,
+            body: data.get("body")
+        }
+    });
+    pushEvent("Task created", `${response.data.task_id} was created inside the selected JTBD.`);
+    formElement.reset();
+    await refreshBoard(state.agentCustomerFilter);
+    persistTaskId(response.data.task_id);
+    state.currentTask = (state.tasks || []).find((task) => task.task_id === response.data.task_id) || null;
+    await refreshAgentInternalTaskWorkspace();
+    renderAgentWorkspace();
+}
+
+async function submitAgentInternalTaskForm(taskId, formElement) {
+    ensureAgentCustomerSelected();
+    const data = new FormData(formElement);
+    const body = data.get("body");
+    const uploadedFiles = await uploadSelectedFiles(data.getAll("attachments"));
+
+    await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/tasks/${encodeURIComponent(taskId)}/messages`, {
+        method: "POST",
+        body: {
+            channel: "UI",
+            sender_type: "AGENT",
+            sender_identifier: state.user.email,
+            body,
+            attachment_urls: [],
+            metadata: { source: "agent_internal_task_workspace" }
+        }
+    });
+
+    for (const file of uploadedFiles) {
+        await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/tasks/${encodeURIComponent(taskId)}/documents`, {
+            method: "POST",
+            body: {
+                channel: "UI",
+                sender_type: "AGENT",
+                sender_identifier: state.user.email,
+                file_url: file.file_token,
+                document_type: "agent_internal_attachment",
+                message_body: "Agent attached an internal task document.",
+                metadata: {
+                    source: "agent_internal_task_workspace_upload",
+                    drive_file_id: driveFileIdFromToken(file.file_token),
+                    file_name: file.file_name,
+                    mime_type: file.mime_type
+                }
+            }
+        });
+    }
+
+    pushEvent("Internal task updated", `The internal note was added to ${taskId} and stays off the customer view.`);
+    await refreshBoard(state.agentCustomerFilter);
 }
 
 function renderCustomerExperience() {
@@ -1338,7 +1404,10 @@ function renderDocumentsIn(containerId, emptyCopy) {
 }
 
 function renderDocumentsFromList(containerId, documents, emptyCopy) {
-    const container = el(containerId);
+    renderDocumentsInElement(el(containerId), documents, emptyCopy);
+}
+
+function renderDocumentsInElement(container, documents, emptyCopy) {
     const template = document.getElementById("documentTemplate");
     if (!container || !template) {
         return;
@@ -1645,6 +1714,11 @@ async function submitCustomerComposeForm(event) {
     let requestId = state.selectedRequestId;
     let createdNewRequest = false;
 
+    if (requestId && !state.customerRequests.some((request) => request.request_id === requestId)) {
+        requestId = null;
+        persistRequestId(null);
+    }
+
     if (!requestId) {
         const created = await api("/v1/customers/me/requests", {
             method: "POST",
@@ -1851,6 +1925,15 @@ async function activateAgentJtbd(customerJtbdId) {
         method: "POST"
     });
     pushEvent("JTBD activated", `${customerJtbdId} is now the active JTBD for this conversation.`);
+    await refreshBoard(state.agentCustomerFilter);
+}
+
+async function deactivateAgentJtbd(customerJtbdId) {
+    ensureAgentCustomerSelected();
+    await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/jtbds/${encodeURIComponent(customerJtbdId)}/deactivate`, {
+        method: "POST"
+    });
+    pushEvent("JTBD deactivated", `${customerJtbdId} is no longer the active JTBD for this conversation.`);
     await refreshBoard(state.agentCustomerFilter);
 }
 
