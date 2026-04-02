@@ -50,7 +50,6 @@ public class InboundEmailService {
     private final DocumentService documentService;
     private final JtbdService jtbdService;
     private final CustomerConversationContextService customerConversationContextService;
-    private final CustomerChannelNotificationService customerChannelNotificationService;
     private final AssignmentService assignmentService;
     private final DocumentLinkService documentLinkService;
     private final RoutingService routingService;
@@ -69,7 +68,9 @@ public class InboundEmailService {
         List<CustomerJtbd> activeJtbds = jtbdService.activeJtbdsForCustomer(customerId);
 
         if (Boolean.TRUE.equals(request.forceNewTask())) {
-            return createNewTask(request, customerId, null);
+            customerConversationContextService.clearActiveTask(customerId, ChannelType.EMAIL);
+            customerConversationContextService.clearActiveJtbd(customerId, ChannelType.EMAIL);
+            return appendToConversation(customerId, null, request, null);
         }
 
         Optional<Task> explicitThread = resolveThreadTask(request);
@@ -101,11 +102,7 @@ public class InboundEmailService {
         Optional<CustomerConversationContextService.PendingSelection> pendingSelection =
                 customerConversationContextService.pendingSelection(customerId, ChannelType.EMAIL);
         if (pendingSelection.isPresent()) {
-            sendSelectionPrompt(
-                    request,
-                    "Which support item would you like to discuss?",
-                    buildPromptBody(pendingSelection.get().type(), pendingSelection.get().options()));
-            return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
+            return appendToConversation(customerId, null, request, null);
         }
 
         if (isSwitchToJtbdRequest(request.bodyText()) && !activeJtbds.isEmpty()) {
@@ -116,8 +113,7 @@ public class InboundEmailService {
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
                     customerId, ChannelType.EMAIL, PendingSelectionType.JTBD, options);
-            sendSelectionPrompt(request, "Which job would you like help with?", buildPromptBody(PendingSelectionType.JTBD, options));
-            return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
+            return appendToConversation(customerId, null, request, null);
         }
 
         Optional<CustomerJtbd> activeJtbd = activeContextJtbd(customerId);
@@ -129,9 +125,6 @@ public class InboundEmailService {
                             request.policyIdHint(),
                             request.attachments() != null && !request.attachments().isEmpty(),
                             activeJtbds);
-            if (decision.createExpertTask()) {
-                return createExpertTask(request, customerId, activeJtbd.get(), decision);
-            }
             return appendToConversation(customerId, activeJtbd.get(), request, decision.assignedQueue());
         }
 
@@ -142,21 +135,10 @@ public class InboundEmailService {
                         request.policyIdHint(),
                         request.attachments() != null && !request.attachments().isEmpty(),
                         activeJtbds);
-        if (decision.createNewJtbd()) {
-            CustomerJtbd createdJtbd =
-                    inboundMessageUnderstandingService.createCustomerJtbd(
-                            customerId, decision.newJtbdTypeName(), jtbdService);
-            customerConversationContextService.setActiveJtbd(customerId, ChannelType.EMAIL, createdJtbd.getPublicId());
-            return decision.createExpertTask()
-                    ? createExpertTask(request, customerId, createdJtbd, decision)
-                    : appendToConversation(customerId, createdJtbd, request, decision.assignedQueue());
-        }
         if (decision.matchedJtbd() != null) {
             customerConversationContextService.setActiveJtbd(
                     customerId, ChannelType.EMAIL, decision.matchedJtbd().getPublicId());
-            return decision.createExpertTask()
-                    ? createExpertTask(request, customerId, decision.matchedJtbd(), decision)
-                    : appendToConversation(customerId, decision.matchedJtbd(), request, decision.assignedQueue());
+            return appendToConversation(customerId, decision.matchedJtbd(), request, decision.assignedQueue());
         }
 
         if (!activeJtbds.isEmpty()) {
@@ -167,11 +149,7 @@ public class InboundEmailService {
             List<CustomerConversationContextService.SelectionOption> options = buildJtbdSelectionOptions(activeJtbds);
             customerConversationContextService.setPendingSelection(
                     customerId, ChannelType.EMAIL, PendingSelectionType.JTBD, options);
-            sendSelectionPrompt(
-                    request,
-                    "Which job would you like help with?",
-                    buildPromptBody(PendingSelectionType.JTBD, options));
-            return new InboundEmailResult(null, null, InboundOutcome.PROMPTED);
+            return appendToConversation(customerId, null, request, decision.assignedQueue());
         }
 
         return appendToConversation(customerId, null, request, decision.assignedQueue());
@@ -544,26 +522,6 @@ public class InboundEmailService {
             }
         }
         return Optional.empty();
-    }
-
-    private void sendSelectionPrompt(InboundEmailRequest request, String subject, String body) {
-        customerChannelNotificationService.send(
-                ChannelType.EMAIL,
-                request.fromAddress(),
-                replySubject(request.subject(), subject),
-                body,
-                new CustomerChannelNotificationService.DeliveryOptions(request.messageId(), request.references()));
-    }
-
-    private static String replySubject(String originalSubject, String fallback) {
-        if (originalSubject == null || originalSubject.isBlank()) {
-            return fallback;
-        }
-        String trimmed = originalSubject.trim();
-        if (trimmed.regionMatches(true, 0, "Re:", 0, 3)) {
-            return trimmed;
-        }
-        return "Re: " + trimmed;
     }
 
     private static boolean isSwitchToTaskRequest(String body) {

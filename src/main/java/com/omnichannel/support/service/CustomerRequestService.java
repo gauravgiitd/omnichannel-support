@@ -84,21 +84,22 @@ public class CustomerRequestService {
     @Transactional
     public CustomerRequestDto createRequest(
             String customerId, String customerEmail, CreateAuthenticatedTaskRequest request) {
-        CustomerJtbd customerJtbd = jtbdService.createGeneralSupportJtbd(customerId);
-        CreateTaskRequest createTaskRequest = new CreateTaskRequest(
-                customerId,
-                request.issueType(),
-                request.lob(),
-                request.claimId(),
-                request.policyId(),
-                request.priority(),
-                request.sourceChannel(),
-                request.initialMessageBody(),
-                customerEmail,
-                request.initialMessageMetadata(),
-                request.initialExternalThreadRef());
-        taskService.createTask(createTaskRequest, customerJtbd);
-        return getRequestForCustomer(customerId, CustomerRequestIds.forJtbd(customerJtbd));
+        Conversation conversation = customerConversationService.getOrCreate(
+                customerId, request.sourceChannel() != null ? request.sourceChannel() : ChannelType.UI);
+        if (request.initialMessageBody() != null && !request.initialMessageBody().isBlank()) {
+            conversationService.appendMessage(
+                    conversation,
+                    customerConversationService.activeCustomerJtbd(conversation),
+                    null,
+                    request.sourceChannel() != null ? request.sourceChannel() : ChannelType.UI,
+                    SenderType.CUSTOMER,
+                    customerEmail,
+                    request.initialMessageBody(),
+                    List.of(),
+                    request.initialExternalThreadRef(),
+                    request.initialMessageMetadata());
+        }
+        return getRequestForCustomer(customerId, CustomerRequestIds.forConversation(conversation));
     }
 
     @Transactional

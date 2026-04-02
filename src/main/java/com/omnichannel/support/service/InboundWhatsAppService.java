@@ -68,21 +68,16 @@ public class InboundWhatsAppService {
         boolean directReply = request.replyToWaMessageId() != null && !request.replyToWaMessageId().isBlank();
 
         if (Boolean.TRUE.equals(request.forceNewTask())) {
-            return createNewTask(request, customerId, null);
+            customerConversationContextService.clearActiveTask(customerId, ChannelType.WHATSAPP);
+            customerConversationContextService.clearActiveJtbd(customerId, ChannelType.WHATSAPP);
+            return appendToConversation(customerId, null, request, null);
         }
 
         if (isExplicitNewTaskRequest(request.bodyText())) {
             customerConversationContextService.clearPendingSelection(customerId, ChannelType.WHATSAPP);
             customerConversationContextService.clearActiveTask(customerId, ChannelType.WHATSAPP);
-            List<CustomerConversationContextService.SelectionOption> options =
-                    buildNewTaskOptions(customerId, activeJtbds);
-            if (options.size() == 1 && isStandaloneReference(options.get(0).reference())) {
-                return createNewTask(request, customerId, null);
-            }
-            customerConversationContextService.setPendingSelection(
-                    customerId, ChannelType.WHATSAPP, PendingSelectionType.TARGET, options);
-            sendSelectionPrompt(request.fromE164Phone(), PendingSelectionType.TARGET, options);
-            return new InboundWhatsAppResult(null, null, InboundOutcome.PROMPTED);
+            customerConversationContextService.clearActiveJtbd(customerId, ChannelType.WHATSAPP);
+            return appendToConversation(customerId, null, request, null);
         }
 
         Optional<Task> explicitTask = resolveTargetTask(request, customerId);
@@ -98,7 +93,7 @@ public class InboundWhatsAppService {
         if (selectionMatch.isPresent()) {
             customerConversationContextService.clearPendingSelection(customerId, ChannelType.WHATSAPP);
             if (isStandaloneReference(selectionMatch.get().option().reference())) {
-                return createNewTask(request, customerId, null);
+                return appendToConversation(customerId, null, request, null);
             }
             if (isTaskReference(selectionMatch.get().option().reference())) {
                 Task task = taskService.loadCanonicalTask(stripReferencePrefix(selectionMatch.get().option().reference()));
@@ -142,9 +137,6 @@ public class InboundWhatsAppService {
                             request.policyIdHint(),
                             request.attachmentUrls() != null && !request.attachmentUrls().isEmpty(),
                             activeJtbds);
-            if (decision.createExpertTask()) {
-                return createExpertTask(request, customerId, activeJtbd.get(), decision);
-            }
             return appendToConversation(customerId, activeJtbd.get(), request, decision.assignedQueue());
         }
 
@@ -155,21 +147,10 @@ public class InboundWhatsAppService {
                         request.policyIdHint(),
                         request.attachmentUrls() != null && !request.attachmentUrls().isEmpty(),
                         activeJtbds);
-        if (decision.createNewJtbd()) {
-            CustomerJtbd createdJtbd =
-                    inboundMessageUnderstandingService.createCustomerJtbd(
-                            customerId, decision.newJtbdTypeName(), jtbdService);
-            customerConversationContextService.setActiveJtbd(customerId, ChannelType.WHATSAPP, createdJtbd.getPublicId());
-            return decision.createExpertTask()
-                    ? createExpertTask(request, customerId, createdJtbd, decision)
-                    : appendToConversation(customerId, createdJtbd, request, decision.assignedQueue());
-        }
         if (decision.matchedJtbd() != null) {
             customerConversationContextService.setActiveJtbd(
                     customerId, ChannelType.WHATSAPP, decision.matchedJtbd().getPublicId());
-            return decision.createExpertTask()
-                    ? createExpertTask(request, customerId, decision.matchedJtbd(), decision)
-                    : appendToConversation(customerId, decision.matchedJtbd(), request, decision.assignedQueue());
+            return appendToConversation(customerId, decision.matchedJtbd(), request, decision.assignedQueue());
         }
 
         if (!activeJtbds.isEmpty()) {

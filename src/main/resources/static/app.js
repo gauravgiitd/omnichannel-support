@@ -406,6 +406,7 @@ async function refreshBoard(preferredTaskId) {
         ]);
         state.agentCustomers = customerResponse.data;
         state.jtbdTypes = jtbdTypeResponse.data;
+        populateAgentJtbdTypeSelect();
     } else if (state.view === "expert") {
         const response = await api("/v1/expert/tasks");
         state.tasks = response.data;
