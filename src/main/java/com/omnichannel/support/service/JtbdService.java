@@ -19,6 +19,7 @@ import com.omnichannel.support.dto.UpdateCustomerJtbdRequest;
 import com.omnichannel.support.dto.UpsertJtbdTypeRequest;
 import com.omnichannel.support.error.NotFoundException;
 import com.omnichannel.support.error.ValidationException;
+import com.omnichannel.support.repo.ConversationRepository;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import com.omnichannel.support.repo.CustomerJtbdRepository;
 import com.omnichannel.support.repo.JtbdTypeRepository;
@@ -56,6 +57,7 @@ public class JtbdService {
     private final JtbdTypeStageRepository jtbdTypeStageRepository;
     private final CustomerJtbdRepository customerJtbdRepository;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
+    private final ConversationRepository conversationRepository;
     private final TaskRepository taskRepository;
     private final CustomerChannelNotificationService customerChannelNotificationService;
     private final ConversationService conversationService;
@@ -130,8 +132,13 @@ public class JtbdService {
             }
         });
 
+        conversationRepository.findAll().forEach(conversation -> {
+            CustomerAccumulator acc = customers.computeIfAbsent(conversation.getCustomerId(), CustomerAccumulator::new);
+            acc.hasConversation = true;
+        });
+
         return customers.values().stream()
-                .filter(acc -> acc.taskCount > 0 || acc.activeJtbdCount > 0)
+                .filter(acc -> acc.taskCount > 0 || acc.activeJtbdCount > 0 || acc.hasConversation)
                 .sorted(Comparator.comparing(CustomerAccumulator::customerId))
                 .map(CustomerAccumulator::toDto)
                 .toList();
@@ -498,6 +505,7 @@ public class JtbdService {
         private final List<String> phones = new ArrayList<>();
         private long taskCount;
         private long activeJtbdCount;
+        private boolean hasConversation;
 
         private CustomerAccumulator(String customerId) {
             this.customerId = customerId;
