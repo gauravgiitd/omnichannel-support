@@ -12,6 +12,7 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -20,6 +21,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -27,10 +30,10 @@ import org.springframework.stereotype.Service;
 public class GmailApiClient {
 
     private static final String GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
+    private static final Logger log = LoggerFactory.getLogger(GmailApiClient.class);
 
     private final GmailPollingProperties properties;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     public boolean isConfigured() {
         return hasText(properties.getClientId())
@@ -74,11 +77,11 @@ public class GmailApiClient {
 
     private JsonNode getJson(String path) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create("https://gmail.googleapis.com" + path))
-                .timeout(Duration.ofSeconds(20))
+                .timeout(Duration.ofMillis(properties.getRequestTimeoutMs()))
                 .header("Authorization", "Bearer " + accessToken())
                 .GET()
                 .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = sendWithRetry(request);
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException("Gmail API GET failed: " + response.statusCode() + " " + response.body());
         }
@@ -87,15 +90,35 @@ public class GmailApiClient {
 
     private void postJson(String path, Map<String, Object> payload) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create("https://gmail.googleapis.com" + path))
-                .timeout(Duration.ofSeconds(20))
+                .timeout(Duration.ofMillis(properties.getRequestTimeoutMs()))
                 .header("Authorization", "Bearer " + accessToken())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)))
                 .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = sendWithRetry(request);
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException("Gmail API POST failed: " + response.statusCode() + " " + response.body());
         }
+    }
+
+    private HttpResponse<String> sendWithRetry(HttpRequest request) throws IOException, InterruptedException {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(properties.getConnectTimeoutMs()))
+                .build();
+        int maxAttempts = Math.max(1, properties.getRequestRetries() + 1);
+        HttpTimeoutException timeout = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            try {
+                return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            } catch (HttpTimeoutException ex) {
+                timeout = ex;
+                if (attempt >= maxAttempts) {
+                    break;
+                }
+                log.warn("Gmail API request timed out on attempt {} of {}; retrying once more", attempt, maxAttempts);
+            }
+        }
+        throw timeout != null ? timeout : new HttpTimeoutException("gmail request timed out");
     }
 
     private String accessToken() throws IOException {

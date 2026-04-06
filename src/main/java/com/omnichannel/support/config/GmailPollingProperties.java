@@ -8,6 +8,9 @@ public class GmailPollingProperties {
     private boolean enabled;
     private long fixedDelayMs = 30000;
     private int maxResults = 20;
+    private long connectTimeoutMs = 10000;
+    private long requestTimeoutMs = 30000;
+    private int requestRetries = 1;
     private String userId = "me";
     private String query;
     private String clientId;
@@ -36,6 +39,30 @@ public class GmailPollingProperties {
 
     public void setMaxResults(int maxResults) {
         this.maxResults = maxResults;
+    }
+
+    public long getConnectTimeoutMs() {
+        return connectTimeoutMs;
+    }
+
+    public void setConnectTimeoutMs(long connectTimeoutMs) {
+        this.connectTimeoutMs = connectTimeoutMs;
+    }
+
+    public long getRequestTimeoutMs() {
+        return requestTimeoutMs;
+    }
+
+    public void setRequestTimeoutMs(long requestTimeoutMs) {
+        this.requestTimeoutMs = requestTimeoutMs;
+    }
+
+    public int getRequestRetries() {
+        return requestRetries;
+    }
+
+    public void setRequestRetries(int requestRetries) {
+        this.requestRetries = requestRetries;
     }
 
     public String getUserId() {

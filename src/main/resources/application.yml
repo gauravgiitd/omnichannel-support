@@ -58,6 +58,9 @@ support:
     enabled: ${GMAIL_POLLING_ENABLED:false}
     fixed-delay-ms: ${GMAIL_POLLING_FIXED_DELAY_MS:30000}
     max-results: ${GMAIL_POLLING_MAX_RESULTS:20}
+    connect-timeout-ms: ${GMAIL_POLLING_CONNECT_TIMEOUT_MS:10000}
+    request-timeout-ms: ${GMAIL_POLLING_REQUEST_TIMEOUT_MS:30000}
+    request-retries: ${GMAIL_POLLING_REQUEST_RETRIES:1}
     user-id: ${GMAIL_POLLING_USER_ID:me}
     query: ${GMAIL_POLLING_QUERY:}
     client-id: ${GMAIL_POLLING_CLIENT_ID:}
