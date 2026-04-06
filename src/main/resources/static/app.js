@@ -1240,7 +1240,7 @@ function renderCustomerExperience() {
         return;
     }
     if (!state.currentRequest) {
-        customerHeading.textContent = "Your support conversation";
+        customerHeading.textContent = "Customer communication timeline";
         text("customerAppSubhead", "Your customer journey now stays in one continuous thread across app, email, and WhatsApp.");
         text("customerStatusPill", "Ready");
         renderChatThread("customerConversationThread", [], true);
