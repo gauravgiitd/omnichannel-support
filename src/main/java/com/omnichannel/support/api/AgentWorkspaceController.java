@@ -12,6 +12,9 @@ import com.omnichannel.support.dto.MessageDto;
 import com.omnichannel.support.dto.PostMessageRequest;
 import com.omnichannel.support.dto.RegisterDocumentRequest;
 import com.omnichannel.support.dto.TaskDto;
+import com.omnichannel.support.dto.WhatsAppCallActionRequest;
+import com.omnichannel.support.dto.WhatsAppCallControlDto;
+import com.omnichannel.support.dto.WhatsAppCallEventDto;
 import com.omnichannel.support.security.AppUser;
 import com.omnichannel.support.security.AuthenticatedUserService;
 import com.omnichannel.support.service.AgentWorkspaceService;
@@ -155,5 +158,65 @@ public class AgentWorkspaceController {
             @PathVariable("customerJtbdId") String customerJtbdId) {
         return ResponseEntity.ok(ApiResponse.success(
                 agentWorkspaceService.completeConversationJtbd(customerId, customerJtbdId)));
+    }
+
+    @PostMapping("/customers/{customerId}/whatsapp-calls/permission")
+    public ResponseEntity<ApiResponse<WhatsAppCallEventDto>> requestWhatsAppCallPermission(
+            @PathVariable("customerId") String customerId,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(agentWorkspaceService.requestWhatsAppCallPermission(customerId, user.email())));
+    }
+
+    @GetMapping("/customers/{customerId}/whatsapp-calls/{callId}")
+    public ResponseEntity<ApiResponse<WhatsAppCallControlDto>> getWhatsAppCall(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("callId") String callId) {
+        return ResponseEntity.ok(ApiResponse.success(agentWorkspaceService.getWhatsAppCall(customerId, callId)));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/whatsapp-calls/{callId}/pre-accept", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<WhatsAppCallControlDto>> preAcceptWhatsAppCall(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("callId") String callId,
+            @Valid @RequestBody WhatsAppCallActionRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        return ResponseEntity.ok(ApiResponse.success(
+                agentWorkspaceService.preAcceptWhatsAppCall(customerId, callId, request.sdpType(), request.sdp(), user.email())));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/whatsapp-calls/{callId}/accept", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<WhatsAppCallControlDto>> acceptWhatsAppCall(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("callId") String callId,
+            @Valid @RequestBody WhatsAppCallActionRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        return ResponseEntity.ok(ApiResponse.success(
+                agentWorkspaceService.acceptWhatsAppCall(customerId, callId, request.sdpType(), request.sdp(), user.email())));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/whatsapp-calls/{callId}/reject", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<WhatsAppCallControlDto>> rejectWhatsAppCall(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("callId") String callId,
+            @Valid @RequestBody WhatsAppCallActionRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        return ResponseEntity.ok(ApiResponse.success(
+                agentWorkspaceService.rejectWhatsAppCall(customerId, callId, user.email())));
+    }
+
+    @PostMapping(path = "/customers/{customerId}/whatsapp-calls/{callId}/terminate", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<WhatsAppCallControlDto>> terminateWhatsAppCall(
+            @PathVariable("customerId") String customerId,
+            @PathVariable("callId") String callId,
+            @Valid @RequestBody WhatsAppCallActionRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        return ResponseEntity.ok(ApiResponse.success(
+                agentWorkspaceService.terminateWhatsAppCall(customerId, callId, user.email())));
     }
 }

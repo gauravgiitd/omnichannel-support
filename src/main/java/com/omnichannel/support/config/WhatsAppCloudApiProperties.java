@@ -6,9 +6,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class WhatsAppCloudApiProperties {
 
     private boolean enabled;
+    private boolean callingEnabled;
     private String verifyToken;
     private String accessToken;
     private String phoneNumberId;
+    private String graphApiVersion = "v23.0";
 
     public boolean isEnabled() {
         return enabled;
@@ -16,6 +18,14 @@ public class WhatsAppCloudApiProperties {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public boolean isCallingEnabled() {
+        return callingEnabled;
+    }
+
+    public void setCallingEnabled(boolean callingEnabled) {
+        this.callingEnabled = callingEnabled;
     }
 
     public String getVerifyToken() {
@@ -40,5 +50,13 @@ public class WhatsAppCloudApiProperties {
 
     public void setPhoneNumberId(String phoneNumberId) {
         this.phoneNumberId = phoneNumberId;
+    }
+
+    public String getGraphApiVersion() {
+        return graphApiVersion;
+    }
+
+    public void setGraphApiVersion(String graphApiVersion) {
+        this.graphApiVersion = graphApiVersion;
     }
 }

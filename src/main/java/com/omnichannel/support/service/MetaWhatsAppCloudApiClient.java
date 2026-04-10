@@ -19,8 +19,6 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class MetaWhatsAppCloudApiClient {
 
-    private static final String GRAPH_BASE_URL = "https://graph.facebook.com/v23.0";
-
     private final WhatsAppCloudApiProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
@@ -33,9 +31,13 @@ public class MetaWhatsAppCloudApiClient {
         return isConfigured() && hasText(properties.getPhoneNumberId());
     }
 
+    public boolean canManageCalls() {
+        return isConfigured() && hasText(properties.getPhoneNumberId()) && properties.isCallingEnabled();
+    }
+
     public MediaDescriptor getMediaMetadata(String mediaId) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create(
-                        GRAPH_BASE_URL + "/" + urlEncode(mediaId) + "?fields=id,url,mime_type,file_size,sha256"))
+                        graphBaseUrl() + "/" + urlEncode(mediaId) + "?fields=id,url,mime_type,file_size,sha256"))
                 .timeout(Duration.ofSeconds(20))
                 .header("Authorization", "Bearer " + properties.getAccessToken())
                 .GET()
@@ -67,7 +69,7 @@ public class MetaWhatsAppCloudApiClient {
     public String sendTextMessage(String toPhoneNumber, String body) throws IOException, InterruptedException {
         String normalizedPhone = normalizeRecipient(toPhoneNumber);
         HttpRequest request = HttpRequest.newBuilder(
-                        URI.create(GRAPH_BASE_URL + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
+                        URI.create(graphBaseUrl() + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
                 .timeout(Duration.ofSeconds(20))
                 .header("Authorization", "Bearer " + properties.getAccessToken())
                 .header("Content-Type", "application/json")
@@ -118,7 +120,7 @@ public class MetaWhatsAppCloudApiClient {
                                 "title", "Support items",
                                 "rows", rowPayload))));
         HttpRequest request = HttpRequest.newBuilder(
-                        URI.create(GRAPH_BASE_URL + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
+                        URI.create(graphBaseUrl() + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
                 .timeout(Duration.ofSeconds(20))
                 .header("Authorization", "Bearer " + properties.getAccessToken())
                 .header("Content-Type", "application/json")
@@ -159,7 +161,7 @@ public class MetaWhatsAppCloudApiClient {
         System.arraycopy(suffix, 0, payload, prefix.length + bytes.length, suffix.length);
 
         HttpRequest request = HttpRequest.newBuilder(
-                        URI.create(GRAPH_BASE_URL + "/" + urlEncode(properties.getPhoneNumberId()) + "/media"))
+                        URI.create(graphBaseUrl() + "/" + urlEncode(properties.getPhoneNumberId()) + "/media"))
                 .timeout(Duration.ofSeconds(30))
                 .header("Authorization", "Bearer " + properties.getAccessToken())
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
@@ -185,7 +187,7 @@ public class MetaWhatsAppCloudApiClient {
             document.put("caption", caption);
         }
         HttpRequest request = HttpRequest.newBuilder(
-                        URI.create(GRAPH_BASE_URL + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
+                        URI.create(graphBaseUrl() + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
                 .timeout(Duration.ofSeconds(20))
                 .header("Authorization", "Bearer " + properties.getAccessToken())
                 .header("Content-Type", "application/json")
@@ -206,6 +208,41 @@ public class MetaWhatsAppCloudApiClient {
             return messages.get(0).path("id").asText();
         }
         return null;
+    }
+
+    public void performCallAction(
+            String phoneNumberId,
+            String callId,
+            String action,
+            String sdpType,
+            String sdp)
+            throws IOException, InterruptedException {
+        String effectivePhoneNumberId = hasText(phoneNumberId) ? phoneNumberId : properties.getPhoneNumberId();
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("messaging_product", "whatsapp");
+        payload.put("call_id", callId);
+        payload.put("action", action);
+        if (hasText(sdpType) && hasText(sdp)) {
+            payload.put("session", Map.of(
+                    "sdp_type", sdpType,
+                    "sdp", sdp));
+        }
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create(graphBaseUrl() + "/" + urlEncode(effectivePhoneNumberId) + "/calls"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + properties.getAccessToken())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("WhatsApp call action failed: " + response.statusCode() + " " + response.body());
+        }
+    }
+
+    private String graphBaseUrl() {
+        String version = hasText(properties.getGraphApiVersion()) ? properties.getGraphApiVersion().trim() : "v23.0";
+        return "https://graph.facebook.com/" + version;
     }
 
     private static boolean hasText(String value) {

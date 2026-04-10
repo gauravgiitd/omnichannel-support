@@ -10,6 +10,9 @@ public record AgentCustomerWorkspaceDto(
         String customerId,
         List<String> emails,
         List<String> phones,
+        String primaryPhone,
+        boolean whatsappCallingEnabled,
+        String whatsappWebhookPath,
         String conversationId,
         String activeCustomerJtbdId,
         ChannelType primaryChannel,
@@ -19,5 +22,6 @@ public record AgentCustomerWorkspaceDto(
         List<TaskDto> tasks,
         List<MessageDto> messages,
         List<DocumentDto> documents,
+        List<WhatsAppCallEventDto> recentWhatsAppCalls,
         List<AgentAssignmentDto> assignments,
         List<HandlingSessionDto> handlingSessions) {}

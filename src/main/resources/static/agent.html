@@ -106,6 +106,11 @@
                             <div class="subpanel-head">
                                 <h4>Conversation JTBD control</h4>
                             </div>
+                            <p class="small-note" id="agentWhatsAppCallNote">WhatsApp calling is not configured yet for this customer.</p>
+                            <div class="stack-form compact">
+                                <p class="small-note" id="agentWhatsAppWebhookPath">Webhook endpoint: /webhooks/meta/whatsapp</p>
+                                <button type="button" id="requestWhatsAppCallPermission">Request WhatsApp call permission</button>
+                            </div>
                             <form id="agentCreateJtbdForm" class="stack-form compact">
                                 <label>
                                     Create new JTBD
@@ -115,6 +120,15 @@
                                 </label>
                                 <button type="submit">Create and set active JTBD</button>
                             </form>
+                        </div>
+
+                        <div class="subpanel">
+                            <div class="subpanel-head">
+                                <h4>Recent WhatsApp call events</h4>
+                            </div>
+                            <p class="small-note" id="agentWhatsAppCallState">Incoming WhatsApp calls can be answered here through the browser when a call offer is available.</p>
+                            <div id="agentWhatsAppCallEvents" class="queue-stack empty-state">No WhatsApp call events yet.</div>
+                            <audio id="agentWhatsAppRemoteAudio" autoplay playsinline></audio>
                         </div>
 
                         <div class="subpanel">

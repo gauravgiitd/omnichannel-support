@@ -22,6 +22,7 @@ import com.omnichannel.support.repo.MessageJtbdLinkRepository;
 import com.omnichannel.support.repo.TaskDocumentRepository;
 import com.omnichannel.support.repo.TaskMergeMapRepository;
 import com.omnichannel.support.repo.TaskRepository;
+import com.omnichannel.support.repo.WhatsAppCallRepository;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -49,6 +50,7 @@ public class AdminCleanupService {
     private final HandlingSessionRepository handlingSessionRepository;
     private final AuditLogRepository auditLogRepository;
     private final TaskRepository taskRepository;
+    private final WhatsAppCallRepository whatsAppCallRepository;
     private final GoogleDriveStorageService googleDriveStorageService;
     private final ObjectMapper objectMapper;
 
@@ -75,6 +77,7 @@ public class AdminCleanupService {
         int handlingSessionCount = handlingSessionRepository.findAll().size();
         int messageLinkCount = messageJtbdLinkRepository.findAll().size();
         int documentLinkCount = documentLinkRepository.findAll().size();
+        int whatsAppCallCount = whatsAppCallRepository.findAll().size();
 
         int deletedDriveFiles = 0;
         int deletedDriveFolders = 0;
@@ -101,6 +104,7 @@ public class AdminCleanupService {
         messageJtbdLinkRepository.deleteAllInBatch();
         assignmentRepository.deleteAllInBatch();
         handlingSessionRepository.deleteAllInBatch();
+        whatsAppCallRepository.deleteAllInBatch();
         messageRepository.deleteAllInBatch();
         taskDocumentRepository.deleteAllInBatch();
         taskMergeMapRepository.deleteAllInBatch();
@@ -117,7 +121,7 @@ public class AdminCleanupService {
                 identityCount,
                 0,
                 mergeCount,
-                auditCount + jtbdCount + contextCount + assignmentCount + handlingSessionCount + messageLinkCount + documentLinkCount,
+                auditCount + jtbdCount + contextCount + assignmentCount + handlingSessionCount + messageLinkCount + documentLinkCount + whatsAppCallCount,
                 deletedDriveFiles,
                 deletedDriveFolders);
     }
@@ -172,6 +176,9 @@ public class AdminCleanupService {
         List<com.omnichannel.support.domain.HandlingSession> handlingSessions = conversation != null
                 ? handlingSessionRepository.findByConversationOrderByStartAtDesc(conversation)
                 : List.of();
+        List<com.omnichannel.support.domain.WhatsAppCall> whatsAppCalls = normalizedCustomerId == null || normalizedCustomerId.isBlank()
+                ? List.of()
+                : whatsAppCallRepository.findByCustomerId(normalizedCustomerId);
         List<com.omnichannel.support.domain.MessageJtbdLink> messageJtbdLinks = new ArrayList<>();
         messages.forEach(message -> messageJtbdLinks.addAll(messageJtbdLinkRepository.findByMessage(message)));
         customerJtbds.forEach(jtbd -> messageJtbdLinks.addAll(messageJtbdLinkRepository.findByCustomerJtbd(jtbd)));
@@ -238,6 +245,9 @@ public class AdminCleanupService {
         }
         if (!handlingSessions.isEmpty()) {
             handlingSessionRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(handlingSessions)));
+        }
+        if (!whatsAppCalls.isEmpty()) {
+            whatsAppCallRepository.deleteAllInBatch(new ArrayList<>(new java.util.LinkedHashSet<>(whatsAppCalls)));
         }
         if (!messages.isEmpty()) {
             messageRepository.deleteAllInBatch(messages);

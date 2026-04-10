@@ -74,6 +74,8 @@ support:
     refresh-token: ${DRIVE_STORAGE_REFRESH_TOKEN:}
   whatsapp-cloud-api:
     enabled: ${WHATSAPP_CLOUD_API_ENABLED:false}
+    calling-enabled: ${WHATSAPP_CLOUD_API_CALLING_ENABLED:false}
+    graph-api-version: ${WHATSAPP_CLOUD_API_GRAPH_API_VERSION:v23.0}
     verify-token: ${WHATSAPP_CLOUD_API_VERIFY_TOKEN:}
     access-token: ${WHATSAPP_CLOUD_API_ACCESS_TOKEN:}
     phone-number-id: ${WHATSAPP_CLOUD_API_PHONE_NUMBER_ID:}

@@ -26,6 +26,12 @@ const state = {
     agentDomainFilter: "ALL",
     selectedTaskId: localStorage.getItem(STORAGE_KEYS.taskId),
     selectedRequestId: normalizeCustomerRequestId(requestFromUrl || legacyTaskFromUrl || localStorage.getItem(STORAGE_KEYS.requestId)),
+    activeWhatsAppCallId: null,
+    webRtcCall: {
+        peerConnection: null,
+        localStream: null,
+        remoteStream: null
+    },
     currentTask: null,
     currentRequest: null,
     messages: [],
@@ -98,6 +104,23 @@ function bindControls() {
     bindClick("resetContactMappingForm", resetContactMappingForm);
     bindClick("refreshJtbdView", refreshJtbdDashboard);
     bindClick("resetJtbdTypeForm", resetJtbdTypeForm);
+    bindClick("requestWhatsAppCallPermission", async () => {
+        ensureAgentCustomerSelected();
+        const response = await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/permission`, {
+            method: "POST"
+        });
+        pushEvent(
+            "WhatsApp call permission requested",
+            `A permission request was sent to ${state.agentWorkspace?.primary_phone || "the customer's WhatsApp number"}.`
+        );
+        if (state.agentWorkspace) {
+            state.agentWorkspace.recent_whatsapp_calls = [
+                response.data,
+                ...((state.agentWorkspace.recent_whatsapp_calls || []).filter((call) => call.call_id !== response.data.call_id))
+            ].slice(0, 10);
+            renderAgentWhatsAppCallEvents();
+        }
+    });
     const agentCustomerFilter = el("agentCustomerFilter");
     if (agentCustomerFilter) {
         agentCustomerFilter.addEventListener("change", (event) => {
@@ -886,6 +909,18 @@ function renderAgentWorkspace() {
             ? "Full conversation is visible here. Narrow to a domain when you want a focused working view."
             : `Domain-focused view on ${state.agentDomainFilter}. Switch back to All domains for the full conversation.`;
     }
+    text(
+        "agentWhatsAppCallNote",
+        state.agentWorkspace.whatsapp_calling_enabled
+            ? `WhatsApp calling foundation is enabled for ${state.agentWorkspace.primary_phone}. Webhook readiness is in place; media-call initiation still needs SIP/WebRTC setup.`
+            : `WhatsApp calling is not configured yet${state.agentWorkspace.primary_phone ? ` for ${state.agentWorkspace.primary_phone}` : " for this customer"}.`
+    );
+    text(
+        "agentWhatsAppWebhookPath",
+        state.agentWorkspace.whatsapp_webhook_path
+            ? `Webhook endpoint: ${state.agentWorkspace.whatsapp_webhook_path}`
+            : "Webhook endpoint is not configured yet."
+    );
 
     const filteredMessages = filteredAgentMessages();
     const filteredDocuments = filteredAgentDocuments();
@@ -893,6 +928,7 @@ function renderAgentWorkspace() {
     text("documentCount", `${filteredDocuments.length} docs`);
     renderChatThread("messageTimeline", filteredMessages, false);
     renderDocumentsFromList("documentList", filteredDocuments, "Documents shared from any channel appear here.");
+    renderAgentWhatsAppCallEvents();
     renderAgentJtbds();
     syncFormsWithTask();
     text(
@@ -1120,6 +1156,168 @@ function renderAgentJtbds() {
         if (count) {
             count.textContent = `${(state.internalTaskDocuments || []).length} docs`;
         }
+    });
+}
+
+function renderAgentWhatsAppCallEvents() {
+    const container = el("agentWhatsAppCallEvents");
+    if (!container) {
+        return;
+    }
+    const calls = state.agentWorkspace?.recent_whatsapp_calls || [];
+    if (!calls.length) {
+        container.className = "queue-stack empty-state";
+        container.textContent = "No WhatsApp call events yet.";
+        return;
+    }
+    container.className = "queue-stack";
+    container.innerHTML = calls.map((call) => `
+        <article class="task-card mapping-card">
+            <div class="bubble-meta">
+                <strong>${escapeHtml(call.status || call.event || "CALL_EVENT")}</strong>
+                <span class="badge">${escapeHtml(call.direction || "UNKNOWN")}</span>
+            </div>
+            <p class="task-supporting">${escapeHtml(call.from || "unknown")} -> ${escapeHtml(call.to || "unknown")}</p>
+            <p class="small-note">${escapeHtml(call.call_id || "call")} • ${formatDate(call.occurred_at)}</p>
+            <div class="actions-inline">
+                <button type="button" class="ghost-button agent-whatsapp-answer" data-call-id="${escapeHtml(call.call_id)}" ${call.has_session_sdp ? "" : "disabled"}>Answer in browser</button>
+                <button type="button" class="ghost-button agent-whatsapp-reject" data-call-id="${escapeHtml(call.call_id)}">Reject</button>
+                <button type="button" class="ghost-button agent-whatsapp-terminate" data-call-id="${escapeHtml(call.call_id)}">Hang up</button>
+            </div>
+        </article>
+    `).join("");
+    container.querySelectorAll(".agent-whatsapp-answer").forEach((button) => {
+        button.addEventListener("click", () => answerWhatsAppCall(button.dataset.callId).catch(handleError));
+    });
+    container.querySelectorAll(".agent-whatsapp-reject").forEach((button) => {
+        button.addEventListener("click", () => rejectWhatsAppCall(button.dataset.callId).catch(handleError));
+    });
+    container.querySelectorAll(".agent-whatsapp-terminate").forEach((button) => {
+        button.addEventListener("click", () => terminateWhatsAppCall(button.dataset.callId).catch(handleError));
+    });
+}
+
+async function answerWhatsAppCall(callId) {
+    ensureAgentCustomerSelected();
+    const call = (await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}`)).data;
+    if (!call.session_sdp) {
+        throw new Error("This call does not include a WebRTC offer yet.");
+    }
+    await closeActiveWebRtcCall();
+    const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const remoteStream = new MediaStream();
+    const peerConnection = new RTCPeerConnection({
+        iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
+    });
+    localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+    peerConnection.ontrack = (event) => {
+        event.streams.forEach((stream) => {
+            stream.getTracks().forEach((track) => remoteStream.addTrack(track));
+        });
+        const audio = el("agentWhatsAppRemoteAudio");
+        if (audio) {
+            audio.srcObject = remoteStream;
+        }
+    };
+    await peerConnection.setRemoteDescription({
+        type: call.session_sdp_type || "offer",
+        sdp: call.session_sdp
+    });
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    await waitForIceGatheringComplete(peerConnection);
+    const localDescription = peerConnection.localDescription;
+    await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}/pre-accept`, {
+        method: "POST",
+        body: {
+            action: "pre_accept",
+            sdp_type: localDescription.type,
+            sdp: localDescription.sdp
+        }
+    });
+    await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}/accept`, {
+        method: "POST",
+        body: {
+            action: "accept",
+            sdp_type: localDescription.type,
+            sdp: localDescription.sdp
+        }
+    });
+    state.webRtcCall = {
+        peerConnection,
+        localStream,
+        remoteStream
+    };
+    state.activeWhatsAppCallId = callId;
+    text("agentWhatsAppCallState", `Connected to WhatsApp call ${callId} in this browser.`);
+    pushEvent("WhatsApp call answered", `Answered ${callId} in the browser agent workspace.`);
+    await refreshBoard(state.agentCustomerFilter);
+}
+
+async function rejectWhatsAppCall(callId) {
+    ensureAgentCustomerSelected();
+    await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}/reject`, {
+        method: "POST",
+        body: {
+            action: "reject"
+        }
+    });
+    if (state.activeWhatsAppCallId === callId) {
+        await closeActiveWebRtcCall();
+    }
+    text("agentWhatsAppCallState", `Rejected WhatsApp call ${callId}.`);
+    pushEvent("WhatsApp call rejected", `Rejected ${callId}.`);
+    await refreshBoard(state.agentCustomerFilter);
+}
+
+async function terminateWhatsAppCall(callId) {
+    ensureAgentCustomerSelected();
+    await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}/terminate`, {
+        method: "POST",
+        body: {
+            action: "terminate"
+        }
+    });
+    if (state.activeWhatsAppCallId === callId) {
+        await closeActiveWebRtcCall();
+    }
+    text("agentWhatsAppCallState", `Ended WhatsApp call ${callId}.`);
+    pushEvent("WhatsApp call ended", `Ended ${callId}.`);
+    await refreshBoard(state.agentCustomerFilter);
+}
+
+async function closeActiveWebRtcCall() {
+    const { peerConnection, localStream, remoteStream } = state.webRtcCall || {};
+    if (peerConnection) {
+        peerConnection.getSenders().forEach((sender) => sender.track?.stop());
+        peerConnection.close();
+    }
+    localStream?.getTracks().forEach((track) => track.stop());
+    remoteStream?.getTracks().forEach((track) => track.stop());
+    const audio = el("agentWhatsAppRemoteAudio");
+    if (audio) {
+        audio.srcObject = null;
+    }
+    state.webRtcCall = { peerConnection: null, localStream: null, remoteStream: null };
+    state.activeWhatsAppCallId = null;
+}
+
+function waitForIceGatheringComplete(peerConnection) {
+    if (peerConnection.iceGatheringState === "complete") {
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+        const onStateChange = () => {
+            if (peerConnection.iceGatheringState === "complete") {
+                peerConnection.removeEventListener("icegatheringstatechange", onStateChange);
+                resolve();
+            }
+        };
+        peerConnection.addEventListener("icegatheringstatechange", onStateChange);
+        setTimeout(() => {
+            peerConnection.removeEventListener("icegatheringstatechange", onStateChange);
+            resolve();
+        }, 3000);
     });
 }
 

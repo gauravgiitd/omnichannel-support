@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.omnichannel.support.config.WhatsAppCloudApiProperties;
 import com.omnichannel.support.dto.InboundWhatsAppRequest;
 import com.omnichannel.support.repo.MessageRepository;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +26,8 @@ public class MetaWhatsAppWebhookService {
     private final GoogleDriveStorageService googleDriveStorageService;
     private final InboundWhatsAppService inboundWhatsAppService;
     private final MessageRepository messageRepository;
+    private final AuditService auditService;
+    private final WhatsAppCallingService whatsAppCallingService;
 
     public boolean isConfigured() {
         return properties.isEnabled()
@@ -38,6 +42,7 @@ public class MetaWhatsAppWebhookService {
     public MetaWebhookResult process(String rawPayload) throws Exception {
         JsonNode payload = objectMapper.readTree(rawPayload);
         int processedMessages = 0;
+        int processedCallEvents = 0;
 
         for (JsonNode entry : payload.path("entry")) {
             for (JsonNode change : entry.path("changes")) {
@@ -63,10 +68,50 @@ public class MetaWhatsAppWebhookService {
                         log.warn("Failed processing Meta WhatsApp message {}", messageId, ex);
                     }
                 }
+
+                JsonNode metadata = value.path("metadata");
+                for (JsonNode call : value.path("calls")) {
+                    processedCallEvents += processCallEvent(call, metadata);
+                }
             }
         }
 
-        return new MetaWebhookResult(processedMessages);
+        return new MetaWebhookResult(processedMessages, processedCallEvents);
+    }
+
+    private int processCallEvent(JsonNode call, JsonNode metadata) {
+        String callId = blankToNull(call.path("id").asText());
+        if (callId == null) {
+            return 0;
+        }
+        whatsAppCallingService.recordWebhookEvent(
+                callId,
+                blankToNull(call.path("from").asText()),
+                blankToNull(call.path("to").asText()),
+                blankToNull(call.path("status").asText()),
+                blankToNull(call.path("direction").asText()),
+                blankToNull(call.path("event").asText()),
+                blankToNull(call.path("session").path("sdp_type").asText()),
+                blankToNull(call.path("session").path("sdp").asText()),
+                blankToNull(metadata.path("phone_number_id").asText()),
+                blankToNull(metadata.path("display_phone_number").asText()),
+                parseEpochSeconds(call.path("start_time").asText(null)),
+                parseEpochSeconds(call.path("end_time").asText(null)),
+                call.path("duration").isIntegralNumber() ? call.path("duration").asInt() : null,
+                call.toString());
+        auditService.record(
+                "WHATSAPP_CALL_EVENT",
+                "WhatsAppCall",
+                callId,
+                "SYSTEM",
+                "meta-whatsapp-webhook",
+                Map.of(
+                        "from", blankToNull(call.path("from").asText()),
+                        "to", blankToNull(call.path("to").asText()),
+                        "status", blankToNull(call.path("status").asText()),
+                        "direction", blankToNull(call.path("direction").asText()),
+                        "event", blankToNull(call.path("event").asText())));
+        return 1;
     }
 
     private InboundWhatsAppRequest toInboundRequest(JsonNode message) throws Exception {
@@ -225,5 +270,16 @@ public class MetaWhatsAppWebhookService {
         return java.net.URLEncoder.encode(value == null ? "" : value, java.nio.charset.StandardCharsets.UTF_8);
     }
 
-    public record MetaWebhookResult(int processedMessages) {}
+    private static Instant parseEpochSeconds(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.ofEpochSecond(Long.parseLong(value));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    public record MetaWebhookResult(int processedMessages, int processedCallEvents) {}
 }

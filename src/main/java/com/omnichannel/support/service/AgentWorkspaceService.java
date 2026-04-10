@@ -10,6 +10,7 @@ import com.omnichannel.support.domain.Task;
 import com.omnichannel.support.domain.TaskPriority;
 import com.omnichannel.support.domain.TaskStatus;
 import com.omnichannel.support.domain.TaskType;
+import com.omnichannel.support.config.WhatsAppCloudApiProperties;
 import com.omnichannel.support.dto.AgentAssignmentDto;
 import com.omnichannel.support.dto.AgentCustomerWorkspaceDto;
 import com.omnichannel.support.dto.CreateExpertTaskRequest;
@@ -22,6 +23,8 @@ import com.omnichannel.support.dto.HandlingSessionDto;
 import com.omnichannel.support.dto.MessageDto;
 import com.omnichannel.support.dto.PostMessageRequest;
 import com.omnichannel.support.dto.RegisterDocumentRequest;
+import com.omnichannel.support.dto.WhatsAppCallEventDto;
+import com.omnichannel.support.dto.WhatsAppCallControlDto;
 import com.omnichannel.support.error.NotFoundException;
 import com.omnichannel.support.repo.AssignmentRepository;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
@@ -43,7 +46,9 @@ public class AgentWorkspaceService {
 
     private final JtbdService jtbdService;
     private final TaskService taskService;
+    private final WhatsAppCloudApiProperties whatsAppCloudApiProperties;
     private final CustomerConversationService customerConversationService;
+    private final CustomerChannelNotificationService customerChannelNotificationService;
     private final ConversationService conversationService;
     private final DocumentService documentService;
     private final AssignmentRepository assignmentRepository;
@@ -52,6 +57,7 @@ public class AgentWorkspaceService {
     private final CustomerJtbdRepository customerJtbdRepository;
     private final MessageRepository messageRepository;
     private final DocumentLinkService documentLinkService;
+    private final WhatsAppCallingService whatsAppCallingService;
 
     @Transactional(readOnly = true)
     public List<CustomerSummaryDto> listCustomers() {
@@ -84,6 +90,7 @@ public class AgentWorkspaceService {
                 .map(CustomerIdentityLink::getIdentifierValue)
                 .distinct()
                 .toList();
+        String primaryPhone = phones.isEmpty() ? null : phones.get(0);
 
         String defaultTaskId = rawTasks.stream()
                 .filter(task -> task.getStatus() != TaskStatus.CLOSED && task.getStatus() != TaskStatus.RESOLVED)
@@ -101,6 +108,9 @@ public class AgentWorkspaceService {
                 customerId,
                 emails,
                 phones,
+                primaryPhone,
+                whatsAppCloudApiProperties.isCallingEnabled() && primaryPhone != null && !primaryPhone.isBlank(),
+                "/webhooks/meta/whatsapp",
                 conversation.getPublicId(),
                 conversation.getActiveCustomerJtbdPublicId(),
                 conversation.getPrimaryChannel(),
@@ -110,6 +120,7 @@ public class AgentWorkspaceService {
                 tasks,
                 messages,
                 documents,
+                whatsAppCallingService.listRecentForCustomer(customerId),
                 assignmentRepository.findByConversationOrderByAssignedAtDesc(conversation).stream()
                         .map(assignment -> new AgentAssignmentDto(
                                 assignment.getAssignedGroup(),
@@ -125,6 +136,87 @@ public class AgentWorkspaceService {
                                 session.getStartAt(),
                                 session.getEndAt()))
                         .toList());
+    }
+
+    @Transactional
+    public WhatsAppCallEventDto requestWhatsAppCallPermission(String customerId, String agentEmail) {
+        Conversation conversation = requireConversation(customerId);
+        String recipient = customerIdentityLinkRepository
+                .findFirstByCustomerIdAndIdentifierTypeOrderByCreatedAtAsc(customerId, IdentifierType.PHONE)
+                .map(CustomerIdentityLink::getIdentifierValue)
+                .orElseThrow(() -> new NotFoundException("customer phone not found"));
+        String body = """
+                We can continue helping you here on WhatsApp.
+
+                If you'd like, we can also call you on this WhatsApp number for faster assistance. Please reply on WhatsApp to confirm that you'd like a call from our support team.
+                """;
+        CustomerChannelNotificationService.DirectDeliveryResult delivery =
+                customerChannelNotificationService.send(
+                        com.omnichannel.support.domain.ChannelType.WHATSAPP,
+                        recipient,
+                        null,
+                        body);
+        CustomerJtbd activeJtbd = activeJtbdForConversation(conversation);
+        conversationService.appendMessage(
+                conversation,
+                activeJtbd,
+                null,
+                com.omnichannel.support.domain.ChannelType.WHATSAPP,
+                SenderType.AGENT,
+                agentEmail,
+                body,
+                List.of(),
+                delivery.externalThreadRef(),
+                Map.of(
+                        "source", "agent_whatsapp_call_permission_request",
+                        "delivery", "whatsapp",
+                        "recipient", recipient,
+                        ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER));
+        return toCallEventDto(whatsAppCallingService.recordPermissionRequest(
+                customerId,
+                recipient,
+                agentEmail,
+                delivery.externalThreadRef()));
+    }
+
+    @Transactional(readOnly = true)
+    public WhatsAppCallControlDto getWhatsAppCall(String customerId, String callId) {
+        return whatsAppCallingService.getCallControl(customerId, callId);
+    }
+
+    @Transactional
+    public WhatsAppCallControlDto preAcceptWhatsAppCall(
+            String customerId, String callId, String sdpType, String sdp, String agentEmail) {
+        return whatsAppCallingService.preAcceptCall(customerId, callId, sdpType, sdp, agentEmail);
+    }
+
+    @Transactional
+    public WhatsAppCallControlDto acceptWhatsAppCall(
+            String customerId, String callId, String sdpType, String sdp, String agentEmail) {
+        return whatsAppCallingService.acceptCall(customerId, callId, sdpType, sdp, agentEmail);
+    }
+
+    @Transactional
+    public WhatsAppCallControlDto rejectWhatsAppCall(String customerId, String callId, String agentEmail) {
+        return whatsAppCallingService.rejectCall(customerId, callId, agentEmail);
+    }
+
+    @Transactional
+    public WhatsAppCallControlDto terminateWhatsAppCall(String customerId, String callId, String agentEmail) {
+        return whatsAppCallingService.terminateCall(customerId, callId, agentEmail);
+    }
+
+    private WhatsAppCallEventDto toCallEventDto(com.omnichannel.support.domain.WhatsAppCall call) {
+        return new WhatsAppCallEventDto(
+                call.getCallId(),
+                call.getFromPhone(),
+                call.getToPhone(),
+                call.getStatus(),
+                call.getDirection(),
+                call.getEvent(),
+                call.getSessionSdpType(),
+                call.getSessionSdp() != null && !call.getSessionSdp().isBlank(),
+                call.getUpdatedAt());
     }
 
     @Transactional
