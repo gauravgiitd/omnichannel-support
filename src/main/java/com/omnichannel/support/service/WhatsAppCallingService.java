@@ -11,8 +11,10 @@ import java.io.IOException;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import com.omnichannel.support.repo.WhatsAppCallRepository;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -84,7 +86,15 @@ public class WhatsAppCallingService {
 
     @Transactional(readOnly = true)
     public List<WhatsAppCallEventDto> listRecentForCustomer(String customerId) {
-        return whatsAppCallRepository.findTop10ByCustomerIdOrderByUpdatedAtDesc(customerId).stream()
+        Set<String> customerPhones = customerPhones(customerId);
+        LinkedHashMap<String, WhatsAppCall> callsById = new LinkedHashMap<>();
+        whatsAppCallRepository.findTop10ByCustomerIdOrderByUpdatedAtDesc(customerId).forEach(call -> callsById.put(call.getCallId(), call));
+        whatsAppCallRepository.findTop50ByOrderByUpdatedAtDesc().stream()
+                .filter(call -> matchesCustomerPhones(call, customerPhones))
+                .forEach(call -> callsById.putIfAbsent(call.getCallId(), call));
+        return callsById.values().stream()
+                .sorted((left, right) -> right.getUpdatedAt().compareTo(left.getUpdatedAt()))
+                .limit(10)
                 .map(this::toEventDto)
                 .toList();
     }
@@ -162,10 +172,13 @@ public class WhatsAppCallingService {
     private WhatsAppCall requireOnCustomer(String customerId, String callId) {
         WhatsAppCall call = whatsAppCallRepository.findByCallId(callId)
                 .orElseThrow(() -> new NotFoundException("whatsapp call not found"));
-        if (call.getCustomerId() == null || !call.getCustomerId().equals(customerId)) {
-            throw new NotFoundException("whatsapp call not found on selected customer");
+        if (call.getCustomerId() != null && call.getCustomerId().equals(customerId)) {
+            return call;
         }
-        return call;
+        if (matchesCustomerPhones(call, customerPhones(customerId))) {
+            return call;
+        }
+        throw new NotFoundException("whatsapp call not found on selected customer");
     }
 
     private WhatsAppCallEventDto toEventDto(WhatsAppCall call) {
@@ -215,9 +228,12 @@ public class WhatsAppCallingService {
         if (phone == null || phone.isBlank()) {
             return Optional.empty();
         }
-        return customerIdentityLinkRepository
-                .findByIdentifierTypeAndIdentifierValue(IdentifierType.PHONE, phone)
-                .map(CustomerIdentityLink::getCustomerId);
+        String normalizedPhone = normalizePhone(phone);
+        return customerIdentityLinkRepository.findAll().stream()
+                .filter(link -> link.getIdentifierType() == IdentifierType.PHONE)
+                .filter(link -> normalizedPhone.equals(normalizePhone(link.getIdentifierValue())))
+                .map(CustomerIdentityLink::getCustomerId)
+                .findFirst();
     }
 
     private String resolveCustomerPhone(String fromPhone, String toPhone) {
@@ -243,5 +259,23 @@ public class WhatsAppCallingService {
 
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private Set<String> customerPhones(String customerId) {
+        return customerIdentityLinkRepository.findByCustomerId(customerId).stream()
+                .filter(link -> link.getIdentifierType() == IdentifierType.PHONE)
+                .map(CustomerIdentityLink::getIdentifierValue)
+                .map(WhatsAppCallingService::normalizePhone)
+                .filter(phone -> phone != null && !phone.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private boolean matchesCustomerPhones(WhatsAppCall call, Set<String> customerPhones) {
+        if (customerPhones == null || customerPhones.isEmpty()) {
+            return false;
+        }
+        return customerPhones.contains(normalizePhone(call.getPhoneNumber()))
+                || customerPhones.contains(normalizePhone(call.getFromPhone()))
+                || customerPhones.contains(normalizePhone(call.getToPhone()));
     }
 }
