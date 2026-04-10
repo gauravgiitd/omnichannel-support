@@ -2,6 +2,7 @@ package com.omnichannel.support.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.omnichannel.support.config.WhatsAppCloudApiProperties;
 import com.omnichannel.support.dto.InboundWhatsAppRequest;
 import com.omnichannel.support.repo.MessageRepository;
@@ -85,6 +86,8 @@ public class MetaWhatsAppWebhookService {
         if (callId == null) {
             return 0;
         }
+        String rawCallPayload = buildRawCallPayload(call, metadata);
+        log.info("Received Meta WhatsApp call webhook {} payload={}", callId, truncateForLog(rawCallPayload));
         whatsAppCallingService.recordWebhookEvent(
                 callId,
                 blankToNull(call.path("from").asText()),
@@ -99,7 +102,7 @@ public class MetaWhatsAppWebhookService {
                 parseEpochSeconds(call.path("start_time").asText(null)),
                 parseEpochSeconds(call.path("end_time").asText(null)),
                 call.path("duration").isIntegralNumber() ? call.path("duration").asInt() : null,
-                call.toString());
+                rawCallPayload);
         auditService.record(
                 "WHATSAPP_CALL_EVENT",
                 "WhatsAppCall",
@@ -108,6 +111,13 @@ public class MetaWhatsAppWebhookService {
                 "meta-whatsapp-webhook",
                 buildCallAuditPayload(call));
         return 1;
+    }
+
+    private String buildRawCallPayload(JsonNode call, JsonNode metadata) {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("metadata", metadata == null ? objectMapper.createObjectNode() : metadata.deepCopy());
+        root.set("call", call == null ? objectMapper.createObjectNode() : call.deepCopy());
+        return root.toString();
     }
 
     private static Map<String, Object> buildCallAuditPayload(JsonNode call) {
@@ -292,6 +302,17 @@ public class MetaWhatsAppWebhookService {
         } catch (NumberFormatException ex) {
             return null;
         }
+    }
+
+    private static String truncateForLog(String value) {
+        if (value == null) {
+            return "";
+        }
+        int max = 4000;
+        if (value.length() <= max) {
+            return value;
+        }
+        return value.substring(0, max) + "...(truncated)";
     }
 
     public record MetaWebhookResult(int processedMessages, int processedCallEvents) {}

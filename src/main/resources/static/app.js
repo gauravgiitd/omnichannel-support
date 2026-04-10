@@ -912,7 +912,7 @@ function renderAgentWorkspace() {
     text(
         "agentWhatsAppCallNote",
         state.agentWorkspace.whatsapp_calling_enabled
-            ? `WhatsApp calling foundation is enabled for ${state.agentWorkspace.primary_phone}. Webhook readiness is in place; media-call initiation still needs SIP/WebRTC setup.`
+            ? `WhatsApp calling is enabled for ${state.agentWorkspace.primary_phone}. Incoming call events from Meta will appear here, and browser answering is available when the call event includes a WebRTC offer.`
             : `WhatsApp calling is not configured yet${state.agentWorkspace.primary_phone ? ` for ${state.agentWorkspace.primary_phone}` : " for this customer"}.`
     );
     text(
@@ -1164,7 +1164,9 @@ function renderAgentWhatsAppCallEvents() {
     if (!container) {
         return;
     }
-    const calls = state.agentWorkspace?.recent_whatsapp_calls || [];
+    const calls = state.agentWorkspace?.recent_whats_app_calls
+        || state.agentWorkspace?.recent_whatsapp_calls
+        || [];
     if (!calls.length) {
         container.className = "queue-stack empty-state";
         container.textContent = "No WhatsApp call events yet.";
