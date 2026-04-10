@@ -7,6 +7,7 @@ import com.omnichannel.support.dto.InboundWhatsAppRequest;
 import com.omnichannel.support.repo.MessageRepository;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -105,13 +106,19 @@ public class MetaWhatsAppWebhookService {
                 callId,
                 "SYSTEM",
                 "meta-whatsapp-webhook",
-                Map.of(
-                        "from", blankToNull(call.path("from").asText()),
-                        "to", blankToNull(call.path("to").asText()),
-                        "status", blankToNull(call.path("status").asText()),
-                        "direction", blankToNull(call.path("direction").asText()),
-                        "event", blankToNull(call.path("event").asText())));
+                buildCallAuditPayload(call));
         return 1;
+    }
+
+    private static Map<String, Object> buildCallAuditPayload(JsonNode call) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        putIfPresent(payload, "from", blankToNull(call.path("from").asText()));
+        putIfPresent(payload, "to", blankToNull(call.path("to").asText()));
+        putIfPresent(payload, "status", blankToNull(call.path("status").asText()));
+        putIfPresent(payload, "direction", blankToNull(call.path("direction").asText()));
+        putIfPresent(payload, "event", blankToNull(call.path("event").asText()));
+        putIfPresent(payload, "session_sdp_type", blankToNull(call.path("session").path("sdp_type").asText()));
+        return payload;
     }
 
     private InboundWhatsAppRequest toInboundRequest(JsonNode message) throws Exception {
@@ -264,6 +271,12 @@ public class MetaWhatsAppWebhookService {
 
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private static void putIfPresent(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
     }
 
     private static String urlEncode(String value) {
