@@ -1169,7 +1169,7 @@ function renderAgentWhatsAppCallEvents() {
         || [];
     if (!calls.length) {
         container.className = "queue-stack empty-state";
-        container.textContent = "No WhatsApp call events yet.";
+        container.textContent = "No active WhatsApp call right now.";
         return;
     }
     container.className = "queue-stack";
@@ -1201,18 +1201,35 @@ function renderAgentWhatsAppCallEvents() {
 
 async function answerWhatsAppCall(callId) {
     ensureAgentCustomerSelected();
+    console.info("[wa-call] answer start", { customerId: state.agentCustomerFilter, callId });
     const call = (await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}`)).data;
+    console.info("[wa-call] control payload loaded", {
+        callId,
+        status: call.status,
+        event: call.event,
+        sessionSdpType: call.session_sdp_type,
+        hasSessionSdp: Boolean(call.session_sdp)
+    });
     if (!call.session_sdp) {
         throw new Error("This call does not include a WebRTC offer yet.");
     }
     await closeActiveWebRtcCall();
+    console.info("[wa-call] requesting microphone access", { callId });
     const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.info("[wa-call] microphone access granted", { callId, tracks: localStream.getTracks().length });
     const remoteStream = new MediaStream();
     const peerConnection = new RTCPeerConnection({
         iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
     });
+    peerConnection.oniceconnectionstatechange = () => {
+        console.info("[wa-call] ice connection state", { callId, state: peerConnection.iceConnectionState });
+    };
+    peerConnection.onconnectionstatechange = () => {
+        console.info("[wa-call] peer connection state", { callId, state: peerConnection.connectionState });
+    };
     localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
     peerConnection.ontrack = (event) => {
+        console.info("[wa-call] remote track received", { callId, streams: event.streams.length });
         event.streams.forEach((stream) => {
             stream.getTracks().forEach((track) => remoteStream.addTrack(track));
         });
@@ -1221,14 +1238,24 @@ async function answerWhatsAppCall(callId) {
             audio.srcObject = remoteStream;
         }
     };
+    console.info("[wa-call] setting remote description", { callId });
     await peerConnection.setRemoteDescription({
         type: call.session_sdp_type || "offer",
         sdp: call.session_sdp
     });
+    console.info("[wa-call] remote description set", { callId });
     const answer = await peerConnection.createAnswer();
+    console.info("[wa-call] answer created", { callId, type: answer.type, sdpLength: answer.sdp?.length || 0 });
     await peerConnection.setLocalDescription(answer);
+    console.info("[wa-call] local description set", { callId });
     await waitForIceGatheringComplete(peerConnection);
     const localDescription = peerConnection.localDescription;
+    console.info("[wa-call] ice gathering complete", {
+        callId,
+        localType: localDescription?.type,
+        localSdpLength: localDescription?.sdp?.length || 0
+    });
+    console.info("[wa-call] sending pre-accept", { callId });
     await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}/pre-accept`, {
         method: "POST",
         body: {
@@ -1237,6 +1264,8 @@ async function answerWhatsAppCall(callId) {
             sdp: localDescription.sdp
         }
     });
+    console.info("[wa-call] pre-accept succeeded", { callId });
+    console.info("[wa-call] sending accept", { callId });
     await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}/accept`, {
         method: "POST",
         body: {
@@ -1245,6 +1274,7 @@ async function answerWhatsAppCall(callId) {
             sdp: localDescription.sdp
         }
     });
+    console.info("[wa-call] accept succeeded", { callId });
     state.webRtcCall = {
         peerConnection,
         localStream,

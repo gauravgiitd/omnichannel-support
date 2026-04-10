@@ -13,11 +13,15 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
 public class MetaWhatsAppCloudApiClient {
+
+    private static final Logger log = LoggerFactory.getLogger(MetaWhatsAppCloudApiClient.class);
 
     private final WhatsAppCloudApiProperties properties;
     private final ObjectMapper objectMapper;
@@ -236,8 +240,22 @@ public class MetaWhatsAppCloudApiClient {
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            log.warn(
+                    "WhatsApp call action HTTP failure action={} callId={} phoneNumberId={} status={} body={}",
+                    action,
+                    callId,
+                    effectivePhoneNumberId,
+                    response.statusCode(),
+                    response.body());
             throw new IOException("WhatsApp call action failed: " + response.statusCode() + " " + response.body());
         }
+        log.info(
+                "WhatsApp call action succeeded action={} callId={} phoneNumberId={} status={} body={}",
+                action,
+                callId,
+                effectivePhoneNumberId,
+                response.statusCode(),
+                response.body());
     }
 
     private String graphBaseUrl() {

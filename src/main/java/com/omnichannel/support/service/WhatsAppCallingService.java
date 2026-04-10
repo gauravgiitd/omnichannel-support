@@ -17,12 +17,16 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
 public class WhatsAppCallingService {
+
+    private static final Logger log = LoggerFactory.getLogger(WhatsAppCallingService.class);
 
     private final WhatsAppCallRepository whatsAppCallRepository;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
@@ -94,7 +98,8 @@ public class WhatsAppCallingService {
                 .forEach(call -> callsById.putIfAbsent(call.getCallId(), call));
         return callsById.values().stream()
                 .sorted((left, right) -> right.getUpdatedAt().compareTo(left.getUpdatedAt()))
-                .limit(10)
+                .filter(this::isCurrentCall)
+                .limit(1)
                 .map(this::toEventDto)
                 .toList();
     }
@@ -108,6 +113,12 @@ public class WhatsAppCallingService {
     @Transactional
     public WhatsAppCallControlDto preAcceptCall(String customerId, String callId, String sdpType, String sdp, String actorEmail) {
         WhatsAppCall call = requireOnCustomer(customerId, callId);
+        log.info(
+                "Pre-accepting WhatsApp call {} for customer {} sdpType={} sdpLength={}",
+                callId,
+                customerId,
+                sdpType,
+                sdp == null ? 0 : sdp.length());
         performCallAction(call, "pre_accept", sdpType, sdp);
         call.setStatus("PRE_ACCEPTED");
         call.setEvent("pre_accept");
@@ -120,6 +131,12 @@ public class WhatsAppCallingService {
     @Transactional
     public WhatsAppCallControlDto acceptCall(String customerId, String callId, String sdpType, String sdp, String actorEmail) {
         WhatsAppCall call = requireOnCustomer(customerId, callId);
+        log.info(
+                "Accepting WhatsApp call {} for customer {} sdpType={} sdpLength={}",
+                callId,
+                customerId,
+                sdpType,
+                sdp == null ? 0 : sdp.length());
         performCallAction(call, "accept", sdpType, sdp);
         call.setStatus("ACCEPTED");
         call.setEvent("accept");
@@ -133,6 +150,7 @@ public class WhatsAppCallingService {
     @Transactional
     public WhatsAppCallControlDto rejectCall(String customerId, String callId, String actorEmail) {
         WhatsAppCall call = requireOnCustomer(customerId, callId);
+        log.info("Rejecting WhatsApp call {} for customer {}", callId, customerId);
         performCallAction(call, "reject", null, null);
         call.setStatus("REJECTED");
         call.setEvent("reject");
@@ -144,6 +162,7 @@ public class WhatsAppCallingService {
     @Transactional
     public WhatsAppCallControlDto terminateCall(String customerId, String callId, String actorEmail) {
         WhatsAppCall call = requireOnCustomer(customerId, callId);
+        log.info("Terminating WhatsApp call {} for customer {}", callId, customerId);
         performCallAction(call, "terminate", null, null);
         call.setStatus("TERMINATED");
         call.setEvent("terminate");
@@ -163,9 +182,19 @@ public class WhatsAppCallingService {
                     action,
                     sdpType,
                     sdp);
-        } catch (IOException | InterruptedException ex) {
+        } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            throw new ValidationException("failed to perform WhatsApp call action");
+            log.warn("WhatsApp call action interrupted for call {} action {}", call.getCallId(), action, ex);
+            throw new ValidationException("WhatsApp call action was interrupted");
+        } catch (IOException ex) {
+            log.warn(
+                    "WhatsApp call action failed for call {} action {} phoneNumberId {}: {}",
+                    call.getCallId(),
+                    action,
+                    call.getPhoneNumberId(),
+                    ex.getMessage(),
+                    ex);
+            throw new ValidationException("WhatsApp call action failed: " + ex.getMessage());
         }
     }
 
@@ -259,6 +288,22 @@ public class WhatsAppCallingService {
 
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private boolean isCurrentCall(WhatsAppCall call) {
+        if (call == null) {
+            return false;
+        }
+        String status = blankToNull(call.getStatus());
+        String event = blankToNull(call.getEvent());
+        if ("PERMISSION_REQUESTED".equalsIgnoreCase(status) || "permission_requested".equalsIgnoreCase(event)) {
+            return false;
+        }
+        return !("COMPLETED".equalsIgnoreCase(status)
+                || "FAILED".equalsIgnoreCase(status)
+                || "REJECTED".equalsIgnoreCase(status)
+                || "TERMINATED".equalsIgnoreCase(status)
+                || "terminate".equalsIgnoreCase(event));
     }
 
     private Set<String> customerPhones(String customerId) {
