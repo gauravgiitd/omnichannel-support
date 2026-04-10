@@ -1239,10 +1239,22 @@ async function answerWhatsAppCall(callId) {
         }
     };
     console.info("[wa-call] setting remote description", { callId });
-    await peerConnection.setRemoteDescription({
-        type: call.session_sdp_type || "offer",
-        sdp: call.session_sdp
-    });
+    const normalizedRemoteSdp = normalizeWebRtcSdp(call.session_sdp);
+    try {
+        await peerConnection.setRemoteDescription({
+            type: call.session_sdp_type || "offer",
+            sdp: normalizedRemoteSdp
+        });
+    } catch (error) {
+        console.error("[wa-call] setRemoteDescription failed", {
+            callId,
+            error: error?.message || String(error),
+            sessionSdpType: call.session_sdp_type || "offer",
+            sessionSdpLength: normalizedRemoteSdp?.length || 0,
+            sessionSdpPreview: normalizedRemoteSdp?.slice(0, 500) || ""
+        });
+        throw new Error(`WebRTC remote description failed: ${error?.message || error}`);
+    }
     console.info("[wa-call] remote description set", { callId });
     const answer = await peerConnection.createAnswer();
     console.info("[wa-call] answer created", { callId, type: answer.type, sdpLength: answer.sdp?.length || 0 });
@@ -1351,6 +1363,16 @@ function waitForIceGatheringComplete(peerConnection) {
             resolve();
         }, 3000);
     });
+}
+
+function normalizeWebRtcSdp(sdp) {
+    if (!sdp) {
+        return sdp;
+    }
+    return `${sdp}`
+        .replace(/\r?\n/g, "\r\n")
+        .trim()
+        .concat("\r\n");
 }
 
 function tasksForAgentJtbd(customerJtbdId) {
