@@ -32,6 +32,7 @@ public class WhatsAppCallingService {
     private static final String PERMISSION_GRANTED = "GRANTED";
     private static final String PERMISSION_REJECTED = "REJECTED";
     private static final String PERMISSION_REVOKED = "REVOKED";
+    private static final String PERMISSION_SOURCE_META_WEBHOOK = "meta_webhook";
 
     private final WhatsAppCallRepository whatsAppCallRepository;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
@@ -375,6 +376,7 @@ public class WhatsAppCallingService {
             status = "EXPIRED";
         }
         boolean granted = PERMISSION_GRANTED.equalsIgnoreCase(status)
+                && PERMISSION_SOURCE_META_WEBHOOK.equalsIgnoreCase(blankToNull(call.getPermissionSource()))
                 && expiresAt != null
                 && expiresAt.isAfter(Instant.now());
         return new PermissionState(status, updatedAt, expiresAt, granted);
