@@ -160,9 +160,21 @@ public class MetaWhatsAppWebhookService {
         if (payload == null || payload.isMissingNode() || payload.isNull()) {
             return 0;
         }
-        String recipient = blankToNull(payload.path("recipient").asText());
-        String status = blankToNull(payload.path("status").asText());
+        log.info("Received Meta WhatsApp permission status payload={}", payload.toString());
+        String recipient = firstNonBlank(
+                blankToNull(payload.path("recipient").asText()),
+                blankToNull(payload.path("recipient_id").asText()),
+                blankToNull(payload.path("phone_number").asText()),
+                blankToNull(payload.path("to").asText()),
+                blankToNull(payload.path("from").asText()));
+        String status = firstNonBlank(
+                blankToNull(payload.path("status").asText()),
+                blankToNull(payload.path("permission_status").asText()),
+                blankToNull(payload.path("event").asText()));
         if (recipient == null || status == null) {
+            log.warn(
+                    "Ignoring Meta WhatsApp permission status payload because recipient/status could not be resolved payload={}",
+                    payload.toString());
             return 0;
         }
         whatsAppCallingService.recordPermissionStatus(recipient, status, "meta_webhook");
@@ -358,6 +370,15 @@ public class MetaWhatsAppWebhookService {
         } catch (NumberFormatException ex) {
             return null;
         }
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     public record MetaWebhookResult(int processedMessages, int processedCallEvents) {}

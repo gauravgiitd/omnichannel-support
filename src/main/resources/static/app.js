@@ -1407,6 +1407,7 @@ function syncAgentWhatsAppCallState() {
     if (state.view !== "agent") {
         return;
     }
+    syncAgentWhatsAppPermissionCard();
     const currentCall = currentWhatsAppCall();
     if (currentCall) {
         if (currentCall.direction === "BUSINESS_INITIATED") {
@@ -1430,6 +1431,45 @@ function syncAgentWhatsAppCallState() {
         return;
     }
     text("agentWhatsAppCallState", "Use the same button to request WhatsApp call permission first, then place an outbound call once it is granted.");
+}
+
+function syncAgentWhatsAppPermissionCard() {
+    const badgeEl = el("agentWhatsAppPermissionBadge");
+    const summaryEl = el("agentWhatsAppPermissionSummary");
+    if (!badgeEl || !summaryEl) {
+        return;
+    }
+    const permissionStatus = `${state.agentWorkspace?.whatsapp_call_permission_status || ""}`.toUpperCase();
+    const granted = !!state.agentWorkspace?.whatsapp_call_permission_granted;
+    let badgeText = "Not requested";
+    let badgeClass = "status-pill";
+    let summaryText = "The customer has not approved WhatsApp calling yet.";
+
+    if (granted) {
+        badgeText = "Permission granted";
+        badgeClass = "status-pill good";
+        summaryText = "Customer approved WhatsApp calling. You can place a call now.";
+    } else if (permissionStatus === "REQUESTED") {
+        badgeText = "Waiting for approval";
+        badgeClass = "status-pill warning";
+        summaryText = "A permission request was sent on WhatsApp. The customer must approve it before you can call.";
+    } else if (permissionStatus === "REJECTED") {
+        badgeText = "Permission declined";
+        badgeClass = "status-pill warning";
+        summaryText = "Customer declined WhatsApp calling. Request permission again if needed.";
+    } else if (permissionStatus === "REVOKED") {
+        badgeText = "Permission revoked";
+        badgeClass = "status-pill warning";
+        summaryText = "Customer revoked WhatsApp calling permission. Request it again before calling.";
+    } else if (permissionStatus === "EXPIRED") {
+        badgeText = "Permission expired";
+        badgeClass = "status-pill warning";
+        summaryText = "Previous WhatsApp call permission expired. Request permission again before calling.";
+    }
+
+    badgeEl.className = badgeClass;
+    badgeEl.textContent = badgeText;
+    summaryEl.textContent = summaryText;
 }
 
 function sleep(ms) {
