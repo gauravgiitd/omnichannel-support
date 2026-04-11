@@ -214,6 +214,34 @@ public class MetaWhatsAppCloudApiClient {
         return null;
     }
 
+    public String sendTemplateMessage(String toPhoneNumber, String templateName, String languageCode)
+            throws IOException, InterruptedException {
+        String normalizedPhone = normalizeRecipient(toPhoneNumber);
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create(graphBaseUrl() + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + properties.getAccessToken())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                        "messaging_product", "whatsapp",
+                        "to", normalizedPhone,
+                        "type", "template",
+                        "template", Map.of(
+                                "name", templateName,
+                                "language", Map.of("code", languageCode))))))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("WhatsApp send template failed: " + response.statusCode() + " " + response.body());
+        }
+        JsonNode json = objectMapper.readTree(response.body());
+        JsonNode messages = json.path("messages");
+        if (messages.isArray() && !messages.isEmpty() && messages.get(0).hasNonNull("id")) {
+            return messages.get(0).path("id").asText();
+        }
+        return null;
+    }
+
     public void performCallAction(
             String phoneNumberId,
             String callId,

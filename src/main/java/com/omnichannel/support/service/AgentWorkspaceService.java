@@ -150,17 +150,15 @@ public class AgentWorkspaceService {
                 .findFirstByCustomerIdAndIdentifierTypeOrderByCreatedAtAsc(customerId, IdentifierType.PHONE)
                 .map(CustomerIdentityLink::getIdentifierValue)
                 .orElseThrow(() -> new NotFoundException("customer phone not found"));
-        String body = """
-                We can continue helping you here on WhatsApp.
-
-                If you'd like, we can also call you on this WhatsApp number for faster assistance. Please reply on WhatsApp to confirm that you'd like a call from our support team.
-                """;
+        if (whatsAppCloudApiProperties.getCallPermissionTemplateName() == null
+                || whatsAppCloudApiProperties.getCallPermissionTemplateName().isBlank()) {
+            throw new NotFoundException("whatsapp call permission template is not configured");
+        }
         CustomerChannelNotificationService.DirectDeliveryResult delivery =
-                customerChannelNotificationService.send(
-                        com.omnichannel.support.domain.ChannelType.WHATSAPP,
+                customerChannelNotificationService.sendWhatsAppTemplate(
                         recipient,
-                        null,
-                        body);
+                        whatsAppCloudApiProperties.getCallPermissionTemplateName(),
+                        whatsAppCloudApiProperties.getCallPermissionTemplateLanguage());
         CustomerJtbd activeJtbd = activeJtbdForConversation(conversation);
         conversationService.appendMessage(
                 conversation,
@@ -169,13 +167,14 @@ public class AgentWorkspaceService {
                 com.omnichannel.support.domain.ChannelType.WHATSAPP,
                 SenderType.AGENT,
                 agentEmail,
-                body,
+                "Agent requested WhatsApp calling permission.",
                 List.of(),
                 delivery.externalThreadRef(),
                 Map.of(
                         "source", "agent_whatsapp_call_permission_request",
                         "delivery", "whatsapp",
                         "recipient", recipient,
+                        "template", whatsAppCloudApiProperties.getCallPermissionTemplateName(),
                         ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER));
         return toCallEventDto(whatsAppCallingService.recordPermissionRequest(
                 customerId,

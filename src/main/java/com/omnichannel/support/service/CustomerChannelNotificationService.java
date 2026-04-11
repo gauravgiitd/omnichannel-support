@@ -114,6 +114,26 @@ public class CustomerChannelNotificationService {
         }
     }
 
+    public DirectDeliveryResult sendWhatsAppTemplate(String recipient, String templateName, String languageCode) {
+        if (!metaWhatsAppCloudApiClient.canSendMessages()) {
+            throw new ValidationException("WhatsApp Cloud API outbound messaging is not configured");
+        }
+        try {
+            String messageId = metaWhatsAppCloudApiClient.sendTemplateMessage(recipient, templateName, languageCode);
+            return new DirectDeliveryResult(
+                    ChannelType.WHATSAPP,
+                    recipient,
+                    messageId,
+                    Map.of(
+                            "delivery", "whatsapp",
+                            "recipient", recipient,
+                            "template", templateName,
+                            "template_language", languageCode));
+        } catch (Exception ex) {
+            throw new ValidationException("failed to send WhatsApp template notification");
+        }
+    }
+
     private static String buildOutboundMessageId() {
         return "<notify-" + UUID.randomUUID() + "@support.local>";
     }

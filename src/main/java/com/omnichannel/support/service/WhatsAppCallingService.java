@@ -84,7 +84,6 @@ public class WhatsAppCallingService {
             call.setDurationSeconds(durationSeconds);
         }
         call.setRawPayloadJson(rawPayloadJson);
-        maybeRecordPermissionFromInboundCall(call);
         return whatsAppCallRepository.save(call);
     }
 
@@ -131,19 +130,6 @@ public class WhatsAppCallingService {
         call.setPermissionExpiresAt(permissionExpiryForStatus(call.getPermissionStatus(), call.getPermissionStatusUpdatedAt()));
         call.setPermissionSource(blankToNull(source));
         return whatsAppCallRepository.save(call);
-    }
-
-    @Transactional
-    public Optional<WhatsAppCall> capturePermissionReply(String customerId, String phoneNumber, String messageBody) {
-        PermissionState permissionState = currentPermissionState(customerId);
-        if (!PERMISSION_REQUESTED.equalsIgnoreCase(permissionState.status())) {
-            return Optional.empty();
-        }
-        String decision = interpretPermissionReply(messageBody);
-        if (decision == null) {
-            return Optional.empty();
-        }
-        return Optional.of(recordPermissionStatus(phoneNumber, decision, "customer_reply"));
     }
 
     @Transactional(readOnly = true)
@@ -394,20 +380,6 @@ public class WhatsAppCallingService {
         return new PermissionState(status, updatedAt, expiresAt, granted);
     }
 
-    private void maybeRecordPermissionFromInboundCall(WhatsAppCall call) {
-        if (call == null) {
-            return;
-        }
-        if ("USER_INITIATED".equalsIgnoreCase(call.getDirection())
-                && "connect".equalsIgnoreCase(call.getEvent())
-                && hasText(call.getPhoneNumber())) {
-            call.setPermissionStatus(PERMISSION_GRANTED);
-            call.setPermissionStatusUpdatedAt(Instant.now());
-            call.setPermissionExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
-            call.setPermissionSource("user_initiated_call");
-        }
-    }
-
     private static Instant permissionExpiryForStatus(String status, Instant reference) {
         if (reference == null || status == null) {
             return null;
@@ -416,21 +388,6 @@ public class WhatsAppCallingService {
             case PERMISSION_GRANTED, PERMISSION_REJECTED, PERMISSION_REQUESTED, PERMISSION_REVOKED -> reference.plus(7, ChronoUnit.DAYS);
             default -> reference;
         };
-    }
-
-    private static String interpretPermissionReply(String body) {
-        String normalized = blankToNull(body);
-        if (normalized == null) {
-            return null;
-        }
-        String lowered = normalized.toLowerCase(java.util.Locale.ROOT);
-        if (lowered.matches(".*\\b(granted|yes|sure|okay|ok|call me|you can call|please call)\\b.*")) {
-            return PERMISSION_GRANTED;
-        }
-        if (lowered.matches(".*\\b(rejected|no|don't call|do not call|not now|later)\\b.*")) {
-            return PERMISSION_REJECTED;
-        }
-        return null;
     }
 
     private static String normalizePermissionStatus(String value) {

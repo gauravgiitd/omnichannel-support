@@ -11,6 +11,8 @@ public class WhatsAppCloudApiProperties {
     private String accessToken;
     private String phoneNumberId;
     private String graphApiVersion = "v23.0";
+    private String callPermissionTemplateName;
+    private String callPermissionTemplateLanguage = "en";
 
     public boolean isEnabled() {
         return enabled;
@@ -58,5 +60,21 @@ public class WhatsAppCloudApiProperties {
 
     public void setGraphApiVersion(String graphApiVersion) {
         this.graphApiVersion = graphApiVersion;
+    }
+
+    public String getCallPermissionTemplateName() {
+        return callPermissionTemplateName;
+    }
+
+    public void setCallPermissionTemplateName(String callPermissionTemplateName) {
+        this.callPermissionTemplateName = callPermissionTemplateName;
+    }
+
+    public String getCallPermissionTemplateLanguage() {
+        return callPermissionTemplateLanguage;
+    }
+
+    public void setCallPermissionTemplateLanguage(String callPermissionTemplateLanguage) {
+        this.callPermissionTemplateLanguage = callPermissionTemplateLanguage;
     }
 }
