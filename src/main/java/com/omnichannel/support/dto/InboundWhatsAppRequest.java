@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.util.List;
+import java.util.Map;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record InboundWhatsAppRequest(
@@ -19,4 +20,5 @@ public record InboundWhatsAppRequest(
         @Size(max = 64) String policyIdHint,
         @Size(max = 64) String claimIdHint,
         Boolean forceNewTask,
-        List<@Size(max = 2048) String> attachmentUrls) {}
+        List<@Size(max = 2048) String> attachmentUrls,
+        Map<String, Object> metadata) {}

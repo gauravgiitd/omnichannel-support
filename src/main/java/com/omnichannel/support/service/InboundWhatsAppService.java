@@ -744,6 +744,9 @@ public class InboundWhatsAppService {
     private static Map<String, Object> buildWaMetadata(InboundWhatsAppRequest request) {
         Map<String, Object> meta = new HashMap<>();
         meta.put("wa_message_id", request.waMessageId());
+        if (request.metadata() != null) {
+            meta.putAll(request.metadata());
+        }
         return meta;
     }
 

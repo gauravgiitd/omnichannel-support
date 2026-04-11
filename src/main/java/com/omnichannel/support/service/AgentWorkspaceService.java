@@ -1,6 +1,7 @@
 package com.omnichannel.support.service;
 
 import com.omnichannel.support.domain.Conversation;
+import com.omnichannel.support.domain.ChannelType;
 import com.omnichannel.support.domain.CustomerIdentityLink;
 import com.omnichannel.support.domain.CustomerJtbd;
 import com.omnichannel.support.domain.ExecutionTier;
@@ -49,6 +50,7 @@ public class AgentWorkspaceService {
     private final WhatsAppCloudApiProperties whatsAppCloudApiProperties;
     private final CustomerConversationService customerConversationService;
     private final CustomerChannelNotificationService customerChannelNotificationService;
+    private final ConversationChannelReplyService conversationChannelReplyService;
     private final ConversationService conversationService;
     private final DocumentService documentService;
     private final AssignmentRepository assignmentRepository;
@@ -258,17 +260,40 @@ public class AgentWorkspaceService {
                                     ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER))));
         }
 
+        Map<String, Object> metadata = new HashMap<>();
+        if (request.metadata() != null) {
+            metadata.putAll(request.metadata());
+        }
+        ChannelType channel = request.channel() != null ? request.channel() : conversation.getPrimaryChannel();
+        String externalThreadRef = request.externalThreadRef();
+        try {
+            ConversationChannelReplyService.OutboundDeliveryResult delivery =
+                    conversationChannelReplyService.deliverAgentReply(conversation, customerId, agentEmail, request.body());
+            if (delivery.metadata() != null) {
+                metadata.putAll(delivery.metadata());
+            }
+            if (delivery.channel() != null) {
+                channel = delivery.channel();
+            }
+            externalThreadRef = delivery.externalThreadRef();
+            metadata.put("delivery_status", "sent");
+        } catch (com.omnichannel.support.error.ValidationException ex) {
+            metadata.put("delivery_status", "failed");
+            metadata.put("delivery_error", ex.getMessage());
+            metadata.put("delivery_channel", channel != null ? channel.name() : conversation.getPrimaryChannel().name());
+        }
+
         return conversationService.appendMessage(
                 conversation,
                 activeJtbd,
                 null,
-                request.channel() != null ? request.channel() : conversation.getPrimaryChannel(),
+                channel,
                 SenderType.AGENT,
                 agentEmail,
                 request.body(),
                 request.attachmentUrls(),
-                request.externalThreadRef(),
-                mergeMetadata(request.metadata(), Map.of(
+                externalThreadRef,
+                mergeMetadata(metadata, Map.of(
                         "source", "agent_conversation_workspace",
                         ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER)));
     }
@@ -299,6 +324,10 @@ public class AgentWorkspaceService {
                                     ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER))));
         }
 
+        Map<String, Object> deliveryMeta = new HashMap<>();
+        if (request.metadata() != null) {
+            deliveryMeta.putAll(request.metadata());
+        }
         DocumentDto document = documentService.register(
                 conversation,
                 activeJtbd,
@@ -312,11 +341,32 @@ public class AgentWorkspaceService {
                 mergeMetadata(request.metadata(), Map.of(
                         "source", "agent_conversation_workspace_upload",
                         ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER)));
+        try {
+            ConversationChannelReplyService.OutboundDeliveryResult delivery =
+                    conversationChannelReplyService.deliverAgentDocument(
+                            conversation,
+                            customerId,
+                            agentEmail,
+                            document,
+                            request.messageBody());
+            if (delivery.metadata() != null) {
+                deliveryMeta.putAll(delivery.metadata());
+            }
+            deliveryMeta.put("delivery_status", "sent");
+        } catch (com.omnichannel.support.error.ValidationException ex) {
+            deliveryMeta.put("delivery_status", "failed");
+            deliveryMeta.put("delivery_error", ex.getMessage());
+            deliveryMeta.put("delivery_channel", conversation.getPrimaryChannel().name());
+        }
         MessageDto message = conversationService.appendMessage(
                 conversation,
                 activeJtbd,
                 null,
-                request.channel() != null ? request.channel() : conversation.getPrimaryChannel(),
+                deliveryMeta.get("delivery") instanceof String deliveryType && deliveryType.startsWith("email")
+                        ? com.omnichannel.support.domain.ChannelType.EMAIL
+                        : deliveryMeta.get("delivery") instanceof String deliveryType && deliveryType.startsWith("whatsapp")
+                                ? com.omnichannel.support.domain.ChannelType.WHATSAPP
+                                : request.channel() != null ? request.channel() : conversation.getPrimaryChannel(),
                 SenderType.AGENT,
                 agentEmail,
                 request.messageBody() != null && !request.messageBody().isBlank()
@@ -324,10 +374,10 @@ public class AgentWorkspaceService {
                         : "Agent attached a supporting document.",
                 List.of(document.fileUrl()),
                 null,
-                Map.of(
+                mergeMetadata(deliveryMeta, Map.of(
                         "attachment_ids", List.of(document.documentId()),
                         "source", "agent_conversation_workspace_upload",
-                        ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER));
+                        ConversationService.AUDIENCE_KEY, ConversationService.AUDIENCE_CUSTOMER)));
         documentLinkService.link(
                 documentService.getByPublicId(document.documentId()),
                 conversation,

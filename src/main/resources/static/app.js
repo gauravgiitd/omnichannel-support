@@ -1698,7 +1698,7 @@ function buildMessageNode(message, customerView) {
         `<span class="small-note">${escapeHtml(senderMeta.detail)}</span>`,
         `<span class="small-note">${formatDate(message.created_at)}</span>`
     ].join("");
-    node.querySelector(".bubble-body").textContent = message.body || "";
+    node.querySelector(".bubble-body").textContent = readableMessageBody(message);
 
     const attachments = [
         ...(message.attachment_urls || []).map((url) => `<a class="document-link" href="${url}" target="_blank" rel="noreferrer">${customerView ? "Open file" : "Attachment"}</a>`),
@@ -1706,6 +1706,23 @@ function buildMessageNode(message, customerView) {
     ];
     node.querySelector(".bubble-attachments").innerHTML = attachments.join("");
     return node;
+}
+
+function readableMessageBody(message) {
+    const metadata = message.metadata || {};
+    if (message.channel === "WHATSAPP" && metadata.wa_interactive_type === "call_permission_reply") {
+        const response = `${metadata.wa_call_permission_response || ""}`.toLowerCase();
+        if (response === "accept") {
+            return "Customer approved WhatsApp calling.";
+        }
+        if (response === "reject") {
+            return "Customer declined WhatsApp calling.";
+        }
+        if (response === "revoke") {
+            return "Customer revoked WhatsApp calling permission.";
+        }
+    }
+    return message.body || "";
 }
 
 function renderSenderMeta(message, customerView) {

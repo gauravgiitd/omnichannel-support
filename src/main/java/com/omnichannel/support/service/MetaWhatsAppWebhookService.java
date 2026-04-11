@@ -49,10 +49,6 @@ public class MetaWhatsAppWebhookService {
         for (JsonNode entry : payload.path("entry")) {
             for (JsonNode change : entry.path("changes")) {
                 JsonNode value = change.path("value");
-                log.info(
-                        "Received Meta WhatsApp webhook change field={} keys={}",
-                        blankToNull(change.path("field").asText()),
-                        value.isObject() ? iterableFieldNames(value).toString() : "[]");
                 if (!"whatsapp_business_account".equals(payload.path("object").asText())
                         && !"whatsapp".equals(value.path("messaging_product").asText("whatsapp"))) {
                     continue;
@@ -63,11 +59,6 @@ public class MetaWhatsAppWebhookService {
                         continue;
                     }
                     String messageId = message.path("id").asText();
-                    log.info(
-                            "Received Meta WhatsApp message payload id={} type={} payload={}",
-                            messageId,
-                            blankToNull(message.path("type").asText()),
-                            message.toString());
                     processedCallEvents += processPermissionReplyMessage(message);
                     if (messageRepository.findByExternalThreadRef(messageId).isPresent()) {
                         continue;
@@ -202,7 +193,6 @@ public class MetaWhatsAppWebhookService {
         if (payload == null || payload.isMissingNode() || payload.isNull()) {
             return 0;
         }
-        log.info("Received Meta WhatsApp permission status payload={}", payload.toString());
         String recipient = firstNonBlank(
                 blankToNull(payload.path("recipient").asText()),
                 blankToNull(payload.path("recipient_id").asText()),
@@ -214,9 +204,6 @@ public class MetaWhatsAppWebhookService {
                 blankToNull(payload.path("permission_status").asText()),
                 blankToNull(payload.path("event").asText()));
         if (recipient == null || status == null) {
-            log.warn(
-                    "Ignoring Meta WhatsApp permission status payload because recipient/status could not be resolved payload={}",
-                    payload.toString());
             return 0;
         }
         whatsAppCallingService.recordPermissionStatus(recipient, status, "meta_webhook");
@@ -246,6 +233,7 @@ public class MetaWhatsAppWebhookService {
         String messageId = message.path("id").asText();
         String replyToMessageId = blankToNull(message.path("context").path("id").asText());
         List<String> attachmentUrls = extractAttachments(message);
+        Map<String, Object> messageMetadata = extractMessageMetadata(message);
 
         String bodyText = extractBodyText(message);
         if (!hasText(bodyText)) {
@@ -264,7 +252,8 @@ public class MetaWhatsAppWebhookService {
                 null,
                 null,
                 false,
-                attachmentUrls);
+                attachmentUrls,
+                messageMetadata);
     }
 
     private List<String> extractAttachments(JsonNode message) throws Exception {
@@ -306,6 +295,10 @@ public class MetaWhatsAppWebhookService {
         if (message.path("text").hasNonNull("body")) {
             return message.path("text").path("body").asText();
         }
+        JsonNode callPermissionReply = message.path("interactive").path("call_permission_reply");
+        if (!callPermissionReply.isMissingNode() && callPermissionReply.hasNonNull("response")) {
+            return callPermissionReply.path("response").asText();
+        }
         for (String type : List.of("document", "image", "video")) {
             JsonNode node = message.path(type);
             if (node.hasNonNull("caption")) {
@@ -336,6 +329,24 @@ public class MetaWhatsAppWebhookService {
             return "Customer sent a " + type + " attachment on WhatsApp.";
         }
         return "Customer sent a " + type + " message on WhatsApp.";
+    }
+
+    private static Map<String, Object> extractMessageMetadata(JsonNode message) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        JsonNode interactive = message.path("interactive");
+        if (!interactive.isMissingNode() && !interactive.isNull()) {
+            putIfPresent(metadata, "wa_interactive_type", blankToNull(interactive.path("type").asText()));
+            JsonNode callPermissionReply = interactive.path("call_permission_reply");
+            if (!callPermissionReply.isMissingNode() && !callPermissionReply.isNull()) {
+                putIfPresent(metadata, "wa_call_permission_response", blankToNull(callPermissionReply.path("response").asText()));
+                if (callPermissionReply.path("is_permanent").isBoolean()) {
+                    metadata.put("wa_call_permission_is_permanent", callPermissionReply.path("is_permanent").asBoolean());
+                }
+                putIfPresent(metadata, "wa_call_permission_response_source", blankToNull(callPermissionReply.path("response_source").asText()));
+                putIfPresent(metadata, "wa_call_permission_expiration_timestamp", blankToNull(callPermissionReply.path("expiration_timestamp").asText()));
+            }
+        }
+        return metadata;
     }
 
     private static String resolveFileName(
@@ -421,15 +432,6 @@ public class MetaWhatsAppWebhookService {
             }
         }
         return null;
-    }
-
-    private static java.util.List<String> iterableFieldNames(JsonNode node) {
-        java.util.List<String> names = new java.util.ArrayList<>();
-        if (node == null || !node.isObject()) {
-            return names;
-        }
-        node.fieldNames().forEachRemaining(names::add);
-        return names;
     }
 
     public record MetaWebhookResult(int processedMessages, int processedCallEvents) {}

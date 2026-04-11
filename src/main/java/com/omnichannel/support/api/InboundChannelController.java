@@ -65,7 +65,8 @@ public class InboundChannelController {
                 request.policyIdHint(),
                 request.claimIdHint(),
                 request.forceNewTask(),
-                request.attachmentUrls());
+                request.attachmentUrls(),
+                request.metadata());
         InboundWhatsAppService.InboundWhatsAppResult result = inboundWhatsAppService.ingest(trustedRequest);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));
     }
