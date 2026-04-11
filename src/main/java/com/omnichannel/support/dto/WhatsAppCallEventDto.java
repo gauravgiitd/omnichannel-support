@@ -12,6 +12,7 @@ public record WhatsAppCallEventDto(
         String status,
         String direction,
         String event,
+        String permissionStatus,
         String sessionSdpType,
         boolean hasSessionSdp,
         Instant occurredAt) {}

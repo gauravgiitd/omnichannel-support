@@ -54,11 +54,13 @@ public class InboundWhatsAppService {
     private final RoutingService routingService;
     private final AuditService auditService;
     private final InboundMessageUnderstandingService inboundMessageUnderstandingService;
+    private final WhatsAppCallingService whatsAppCallingService;
 
     @Transactional
     public InboundWhatsAppResult ingest(InboundWhatsAppRequest request) {
         String customerId = resolveCustomerId(request);
         identityResolutionService.registerLink(customerId, IdentifierType.PHONE, request.fromE164Phone());
+        whatsAppCallingService.capturePermissionReply(customerId, request.fromE164Phone(), request.bodyText());
         registerPolicyClaimHints(request, customerId);
         List<Task> openTasks = taskService.findOpenTasksForCustomer(customerId).stream()
                 .map(taskResolutionService::resolveCanonical)

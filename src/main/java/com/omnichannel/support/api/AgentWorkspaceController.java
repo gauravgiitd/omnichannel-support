@@ -169,6 +169,17 @@ public class AgentWorkspaceController {
                 .body(ApiResponse.success(agentWorkspaceService.requestWhatsAppCallPermission(customerId, user.email())));
     }
 
+    @PostMapping(path = "/customers/{customerId}/whatsapp-calls/outgoing", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ApiResponse<WhatsAppCallControlDto>> initiateOutgoingWhatsAppCall(
+            @PathVariable("customerId") String customerId,
+            @Valid @RequestBody WhatsAppCallActionRequest request,
+            Authentication authentication) {
+        AppUser user = authenticatedUserService.requireCurrentUser(authentication);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(
+                        agentWorkspaceService.initiateOutgoingWhatsAppCall(customerId, request.sdpType(), request.sdp(), user.email())));
+    }
+
     @GetMapping("/customers/{customerId}/whatsapp-calls/{callId}")
     public ResponseEntity<ApiResponse<WhatsAppCallControlDto>> getWhatsAppCall(
             @PathVariable("customerId") String customerId,

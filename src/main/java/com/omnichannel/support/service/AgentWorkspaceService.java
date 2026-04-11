@@ -103,6 +103,7 @@ public class AgentWorkspaceService {
                 .filter(value -> value != null && !value.isBlank())
                 .distinct()
                 .toList();
+        WhatsAppCallingService.PermissionState permissionState = whatsAppCallingService.currentPermissionState(customerId);
 
         return new AgentCustomerWorkspaceDto(
                 customerId,
@@ -111,6 +112,10 @@ public class AgentWorkspaceService {
                 primaryPhone,
                 whatsAppCloudApiProperties.isCallingEnabled() && primaryPhone != null && !primaryPhone.isBlank(),
                 "/webhooks/meta/whatsapp",
+                permissionState.status(),
+                permissionState.updatedAt(),
+                permissionState.expiresAt(),
+                permissionState.granted(),
                 conversation.getPublicId(),
                 conversation.getActiveCustomerJtbdPublicId(),
                 conversation.getPrimaryChannel(),
@@ -179,6 +184,16 @@ public class AgentWorkspaceService {
                 delivery.externalThreadRef()));
     }
 
+    @Transactional
+    public WhatsAppCallControlDto initiateOutgoingWhatsAppCall(
+            String customerId, String sdpType, String sdp, String agentEmail) {
+        String recipient = customerIdentityLinkRepository
+                .findFirstByCustomerIdAndIdentifierTypeOrderByCreatedAtAsc(customerId, IdentifierType.PHONE)
+                .map(CustomerIdentityLink::getIdentifierValue)
+                .orElseThrow(() -> new NotFoundException("customer phone not found"));
+        return whatsAppCallingService.initiateOutgoingCall(customerId, recipient, sdpType, sdp, agentEmail);
+    }
+
     @Transactional(readOnly = true)
     public WhatsAppCallControlDto getWhatsAppCall(String customerId, String callId) {
         return whatsAppCallingService.getCallControl(customerId, callId);
@@ -214,6 +229,7 @@ public class AgentWorkspaceService {
                 call.getStatus(),
                 call.getDirection(),
                 call.getEvent(),
+                call.getPermissionStatus(),
                 call.getSessionSdpType(),
                 call.getSessionSdp() != null && !call.getSessionSdp().isBlank(),
                 call.getUpdatedAt());

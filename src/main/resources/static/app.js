@@ -104,24 +104,7 @@ function bindControls() {
     bindClick("resetContactMappingForm", resetContactMappingForm);
     bindClick("refreshJtbdView", refreshJtbdDashboard);
     bindClick("resetJtbdTypeForm", resetJtbdTypeForm);
-    bindClick("requestWhatsAppCallPermission", async () => {
-        ensureAgentCustomerSelected();
-        const response = await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/permission`, {
-            method: "POST"
-        });
-        pushEvent(
-            "WhatsApp call permission requested",
-            `A permission request was sent to ${state.agentWorkspace?.primary_phone || "the customer's WhatsApp number"}.`
-        );
-        if (state.agentWorkspace) {
-            state.agentWorkspace.recent_whatsapp_calls = [
-                response.data,
-                ...((state.agentWorkspace.recent_whatsapp_calls || []).filter((call) => call.call_id !== response.data.call_id))
-            ].slice(0, 10);
-            renderAgentWhatsAppCallEvents();
-        }
-    });
-    bindClick("startOutgoingWhatsAppCall", async () => {
+    bindClick("callUsingWhatsApp", async () => {
         ensureAgentCustomerSelected();
         if (!state.agentWorkspace?.primary_phone) {
             throw new Error("This customer does not have a WhatsApp number yet.");
@@ -130,23 +113,28 @@ function bindControls() {
         if (activeCall) {
             throw new Error("There is already an active WhatsApp call for this customer.");
         }
-        if (!hasRecentWhatsAppCallPermissionRequest()) {
-            await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/permission`, {
+        if (!state.agentWorkspace?.whatsapp_call_permission_granted) {
+            const response = await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/permission`, {
                 method: "POST"
             });
+            if (state.agentWorkspace) {
+                state.agentWorkspace.recent_whats_app_calls = [
+                    response.data,
+                    ...((state.agentWorkspace.recent_whats_app_calls || []).filter((call) => call.call_id !== response.data.call_id))
+                ].slice(0, 10);
+                state.agentWorkspace.whatsapp_call_permission_status = "REQUESTED";
+                state.agentWorkspace.whatsapp_call_permission_updated_at = new Date().toISOString();
+                state.agentWorkspace.whatsapp_call_permission_granted = false;
+            }
             pushEvent(
                 "WhatsApp call permission requested",
-                `Permission was requested on WhatsApp for ${state.agentWorkspace.primary_phone} before starting an outgoing call.`
+                `Permission was requested on WhatsApp for ${state.agentWorkspace.primary_phone}. The same button will start the call once permission is granted.`
             );
-            text("agentWhatsAppCallState", "Permission request sent. Start the outgoing WhatsApp call after the customer confirms.");
+            syncAgentWhatsAppCallState();
             await refreshBoard(state.agentCustomerFilter);
             return;
         }
-        text("agentWhatsAppCallState", `Outgoing WhatsApp call is ready for ${state.agentWorkspace.primary_phone}. Permission has already been requested.`);
-        pushEvent(
-            "Outgoing WhatsApp call ready",
-            `Permission has already been requested for ${state.agentWorkspace.primary_phone}. You can now proceed with the outbound calling flow.`
-        );
+        await startOutgoingWhatsAppCall();
     });
     const agentCustomerFilter = el("agentCustomerFilter");
     if (agentCustomerFilter) {
@@ -943,6 +931,7 @@ function renderAgentWorkspace() {
     renderChatThread("messageTimeline", filteredMessages, false);
     renderDocumentsFromList("documentList", filteredDocuments, "Documents shared from any channel appear here.");
     renderAgentWhatsAppCallEvents();
+    syncAgentWhatsAppCallState();
     renderAgentJtbds();
     syncFormsWithTask();
     text(
@@ -1196,8 +1185,10 @@ function renderAgentWhatsAppCallEvents() {
             <p class="task-supporting">${escapeHtml(call.from || "unknown")} -> ${escapeHtml(call.to || "unknown")}</p>
             <p class="small-note">${escapeHtml(call.call_id || "call")} • ${formatDate(call.occurred_at)}</p>
             <div class="actions-inline">
-                <button type="button" class="ghost-button agent-whatsapp-answer" data-call-id="${escapeHtml(call.call_id)}" ${call.has_session_sdp ? "" : "disabled"}>Answer in browser</button>
-                <button type="button" class="ghost-button agent-whatsapp-reject" data-call-id="${escapeHtml(call.call_id)}">Reject</button>
+                ${call.direction === "USER_INITIATED"
+                    ? `<button type="button" class="ghost-button agent-whatsapp-answer" data-call-id="${escapeHtml(call.call_id)}" ${call.has_session_sdp ? "" : "disabled"}>Answer in browser</button>
+                <button type="button" class="ghost-button agent-whatsapp-reject" data-call-id="${escapeHtml(call.call_id)}">Reject</button>`
+                    : `<span class="small-note">Customer-facing outbound call in progress.</span>`}
                 <button type="button" class="ghost-button agent-whatsapp-terminate" data-call-id="${escapeHtml(call.call_id)}">Hang up</button>
             </div>
         </article>
@@ -1218,14 +1209,6 @@ function currentWhatsAppCall() {
         || state.agentWorkspace?.recent_whatsapp_calls
         || [];
     return calls[0] || null;
-}
-
-function hasRecentWhatsAppCallPermissionRequest() {
-    const messages = state.agentWorkspace?.messages || [];
-    return messages.some((message) =>
-        message.channel === "WHATSAPP"
-        && message.sender_type === "AGENT"
-        && message.metadata?.source === "agent_whatsapp_call_permission_request");
 }
 
 async function answerWhatsAppCall(callId) {
@@ -1288,6 +1271,69 @@ async function answerWhatsAppCall(callId) {
     text("agentWhatsAppCallState", `Connected to WhatsApp call ${callId} in this browser.`);
     pushEvent("WhatsApp call answered", `Answered ${callId} in the browser agent workspace.`);
     await refreshBoard(state.agentCustomerFilter);
+}
+
+async function startOutgoingWhatsAppCall() {
+    ensureAgentCustomerSelected();
+    await closeActiveWebRtcCall();
+    const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const remoteStream = new MediaStream();
+    const peerConnection = new RTCPeerConnection({
+        iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
+    });
+    localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+    peerConnection.ontrack = (event) => {
+        event.streams.forEach((stream) => {
+            stream.getTracks().forEach((track) => remoteStream.addTrack(track));
+        });
+        const audio = el("agentWhatsAppRemoteAudio");
+        if (audio) {
+            audio.srcObject = remoteStream;
+        }
+    };
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    await waitForIceGatheringComplete(peerConnection);
+    const localDescription = peerConnection.localDescription;
+    const initiated = (await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/outgoing`, {
+        method: "POST",
+        body: {
+            action: "connect",
+            sdp_type: localDescription.type,
+            sdp: localDescription.sdp
+        }
+    })).data;
+    state.webRtcCall = {
+        peerConnection,
+        localStream,
+        remoteStream
+    };
+    state.activeWhatsAppCallId = initiated.call_id;
+    text("agentWhatsAppCallState", `Calling ${state.agentWorkspace.primary_phone} on WhatsApp...`);
+    pushEvent("WhatsApp outgoing call started", `Started calling ${state.agentWorkspace.primary_phone} on WhatsApp.`);
+    await waitForOutgoingWhatsAppAnswer(initiated.call_id, peerConnection);
+    await refreshBoard(state.agentCustomerFilter);
+}
+
+async function waitForOutgoingWhatsAppAnswer(callId, peerConnection) {
+    const attempts = 20;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        await sleep(1500);
+        const control = (await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}`)).data;
+        if (["COMPLETED", "FAILED", "REJECTED", "TERMINATED"].includes(control.status)) {
+            throw new Error(`WhatsApp outbound call ended before the customer connected (${control.status}).`);
+        }
+        if (control.session_sdp && control.session_sdp_type === "answer") {
+            await peerConnection.setRemoteDescription({
+                type: "answer",
+                sdp: normalizeWebRtcSdp(control.session_sdp)
+            });
+            text("agentWhatsAppCallState", `Connected to WhatsApp call ${callId} in this browser.`);
+            pushEvent("WhatsApp call connected", `The outbound WhatsApp call ${callId} connected in the browser.`);
+            return;
+        }
+    }
+    text("agentWhatsAppCallState", `Waiting for ${state.agentWorkspace.primary_phone} to answer the WhatsApp call...`);
 }
 
 async function rejectWhatsAppCall(callId) {
@@ -1355,6 +1401,39 @@ function waitForIceGatheringComplete(peerConnection) {
             resolve();
         }, 3000);
     });
+}
+
+function syncAgentWhatsAppCallState() {
+    if (state.view !== "agent") {
+        return;
+    }
+    const currentCall = currentWhatsAppCall();
+    if (currentCall) {
+        if (currentCall.direction === "BUSINESS_INITIATED") {
+            text("agentWhatsAppCallState", `Outgoing WhatsApp call is active for ${state.agentWorkspace?.primary_phone || "this customer"}.`);
+            return;
+        }
+        text("agentWhatsAppCallState", `Incoming WhatsApp call is active for ${state.agentWorkspace?.primary_phone || "this customer"}.`);
+        return;
+    }
+    const permissionStatus = state.agentWorkspace?.whatsapp_call_permission_status;
+    if (state.agentWorkspace?.whatsapp_call_permission_granted) {
+        text("agentWhatsAppCallState", `WhatsApp calling is ready for ${state.agentWorkspace?.primary_phone || "this customer"}.`);
+        return;
+    }
+    if (permissionStatus === "REQUESTED") {
+        text("agentWhatsAppCallState", "Permission has been requested on WhatsApp. Once the customer grants it, the same button will place the outbound call.");
+        return;
+    }
+    if (permissionStatus === "REJECTED" || permissionStatus === "REVOKED" || permissionStatus === "EXPIRED") {
+        text("agentWhatsAppCallState", "WhatsApp call permission is not active right now. Use the button to ask again.");
+        return;
+    }
+    text("agentWhatsAppCallState", "Use the same button to request WhatsApp call permission first, then place an outbound call once it is granted.");
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function normalizeWebRtcSdp(sdp) {

@@ -75,6 +75,10 @@ public class MetaWhatsAppWebhookService {
                 for (JsonNode call : value.path("calls")) {
                     processedCallEvents += processCallEvent(call, metadata);
                 }
+                for (JsonNode status : value.path("statuses")) {
+                    processedCallEvents += processCallStatus(status, metadata);
+                }
+                processedCallEvents += processPermissionStatus(change.path("field"), value);
             }
         }
 
@@ -115,6 +119,53 @@ public class MetaWhatsAppWebhookService {
                 "SYSTEM",
                 "meta-whatsapp-webhook",
                 buildCallAuditPayload(call));
+        return 1;
+    }
+
+    private int processCallStatus(JsonNode status, JsonNode metadata) {
+        if (!"call".equalsIgnoreCase(status.path("type").asText())) {
+            return 0;
+        }
+        String callId = blankToNull(status.path("id").asText());
+        if (callId == null) {
+            return 0;
+        }
+        whatsAppCallingService.recordWebhookEvent(
+                callId,
+                blankToNull(metadata.path("display_phone_number").asText()),
+                blankToNull(status.path("recipient_id").asText()),
+                blankToNull(status.path("status").asText()),
+                "BUSINESS_INITIATED",
+                "status",
+                null,
+                null,
+                blankToNull(metadata.path("phone_number_id").asText()),
+                blankToNull(metadata.path("display_phone_number").asText()),
+                null,
+                null,
+                null,
+                buildRawCallPayload(status, metadata));
+        return 1;
+    }
+
+    private int processPermissionStatus(JsonNode field, JsonNode value) {
+        JsonNode payload = null;
+        if ("call_permission_status".equalsIgnoreCase(field.asText())) {
+            payload = value;
+        } else if ("call_permission_status".equalsIgnoreCase(value.path("event").asText())) {
+            payload = value;
+        } else if (value.has("call_permission_status")) {
+            payload = value.path("call_permission_status");
+        }
+        if (payload == null || payload.isMissingNode() || payload.isNull()) {
+            return 0;
+        }
+        String recipient = blankToNull(payload.path("recipient").asText());
+        String status = blankToNull(payload.path("status").asText());
+        if (recipient == null || status == null) {
+            return 0;
+        }
+        whatsAppCallingService.recordPermissionStatus(recipient, status, "meta_webhook");
         return 1;
     }
 

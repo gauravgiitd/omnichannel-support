@@ -13,5 +13,7 @@ public interface WhatsAppCallRepository extends JpaRepository<WhatsAppCall, Long
 
     List<WhatsAppCall> findByCustomerId(String customerId);
 
+    List<WhatsAppCall> findByPhoneNumberOrderByUpdatedAtDesc(String phoneNumber);
+
     List<WhatsAppCall> findTop50ByOrderByUpdatedAtDesc();
 }

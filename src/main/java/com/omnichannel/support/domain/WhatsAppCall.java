@@ -52,6 +52,18 @@ public class WhatsAppCall {
     @Column(name = "permission_requested_at")
     private Instant permissionRequestedAt;
 
+    @Column(name = "permission_status", length = 32)
+    private String permissionStatus;
+
+    @Column(name = "permission_status_updated_at")
+    private Instant permissionStatusUpdatedAt;
+
+    @Column(name = "permission_expires_at")
+    private Instant permissionExpiresAt;
+
+    @Column(name = "permission_source", length = 64)
+    private String permissionSource;
+
     @Column(name = "external_message_id", length = 256)
     private String externalMessageId;
 
@@ -69,6 +81,15 @@ public class WhatsAppCall {
 
     @Column(name = "display_phone_number", length = 64)
     private String displayPhoneNumber;
+
+    @Column(name = "initiated_by", length = 256)
+    private String initiatedBy;
+
+    @Column(name = "initiated_at")
+    private Instant initiatedAt;
+
+    @Column(name = "biz_opaque_callback_data", length = 256)
+    private String bizOpaqueCallbackData;
 
     @Column(name = "start_time")
     private Instant startTime;

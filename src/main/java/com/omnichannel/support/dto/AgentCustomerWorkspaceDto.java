@@ -3,6 +3,7 @@ package com.omnichannel.support.dto;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import com.omnichannel.support.domain.ChannelType;
+import java.time.Instant;
 import java.util.List;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -13,6 +14,10 @@ public record AgentCustomerWorkspaceDto(
         String primaryPhone,
         boolean whatsappCallingEnabled,
         String whatsappWebhookPath,
+        String whatsappCallPermissionStatus,
+        Instant whatsappCallPermissionUpdatedAt,
+        Instant whatsappCallPermissionExpiresAt,
+        boolean whatsappCallPermissionGranted,
         String conversationId,
         String activeCustomerJtbdId,
         ChannelType primaryChannel,

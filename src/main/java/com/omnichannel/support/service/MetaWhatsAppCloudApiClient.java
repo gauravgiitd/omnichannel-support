@@ -256,6 +256,57 @@ public class MetaWhatsAppCloudApiClient {
                 response.statusCode());
     }
 
+    public CallInitiationResult initiateCall(
+            String toPhoneNumber,
+            String sdpType,
+            String sdp,
+            String bizOpaqueCallbackData)
+            throws IOException, InterruptedException {
+        if (!hasText(sdpType) || !hasText(sdp)) {
+            throw new IOException("Outbound WhatsApp call requires an SDP offer");
+        }
+        String normalizedPhone = normalizeRecipient(toPhoneNumber);
+        java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("messaging_product", "whatsapp");
+        payload.put("to", normalizedPhone);
+        payload.put("action", "connect");
+        payload.put("session", Map.of(
+                "sdp_type", sdpType,
+                "sdp", sdp));
+        if (hasText(bizOpaqueCallbackData)) {
+            payload.put("biz_opaque_callback_data", bizOpaqueCallbackData);
+        }
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create(graphBaseUrl() + "/" + urlEncode(properties.getPhoneNumberId()) + "/calls"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + properties.getAccessToken())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            log.warn(
+                    "WhatsApp outbound call initiation failed to={} phoneNumberId={} status={}",
+                    normalizedPhone,
+                    properties.getPhoneNumberId(),
+                    response.statusCode());
+            throw new IOException("WhatsApp outbound call failed: " + response.statusCode() + " " + response.body());
+        }
+        JsonNode json = objectMapper.readTree(response.body());
+        String callId = null;
+        JsonNode calls = json.path("calls");
+        if (calls.isArray() && !calls.isEmpty()) {
+            callId = blankToNull(calls.get(0).path("id").asText());
+        }
+        if (callId == null) {
+            callId = blankToNull(json.path("call_id").asText());
+        }
+        if (callId == null) {
+            throw new IOException("WhatsApp outbound call succeeded but no call id was returned");
+        }
+        return new CallInitiationResult(callId, properties.getPhoneNumberId(), response.body());
+    }
+
     private String graphBaseUrl() {
         String version = hasText(properties.getGraphApiVersion()) ? properties.getGraphApiVersion().trim() : "v23.0";
         return "https://graph.facebook.com/" + version;
@@ -291,7 +342,13 @@ public class MetaWhatsAppCloudApiClient {
         return value.substring(0, maxLength - 1) + "…";
     }
 
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
     public record MediaDescriptor(String mediaId, String downloadUrl, String mimeType) {}
 
     public record InteractiveListRow(String id, String title, String description) {}
+
+    public record CallInitiationResult(String callId, String phoneNumberId, String rawResponseBody) {}
 }

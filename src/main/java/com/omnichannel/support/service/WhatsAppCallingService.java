@@ -11,6 +11,7 @@ import java.io.IOException;
 import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import com.omnichannel.support.repo.WhatsAppCallRepository;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
@@ -27,6 +28,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class WhatsAppCallingService {
 
     private static final Logger log = LoggerFactory.getLogger(WhatsAppCallingService.class);
+    private static final String PERMISSION_REQUESTED = "REQUESTED";
+    private static final String PERMISSION_GRANTED = "GRANTED";
+    private static final String PERMISSION_REJECTED = "REJECTED";
+    private static final String PERMISSION_REVOKED = "REVOKED";
 
     private final WhatsAppCallRepository whatsAppCallRepository;
     private final CustomerIdentityLinkRepository customerIdentityLinkRepository;
@@ -57,14 +62,29 @@ public class WhatsAppCallingService {
         call.setStatus(blankToNull(status));
         call.setDirection(blankToNull(direction));
         call.setEvent(blankToNull(event));
-        call.setSessionSdpType(blankToNull(sessionSdpType));
-        call.setSessionSdp(blankToNull(sessionSdp));
-        call.setPhoneNumberId(blankToNull(phoneNumberId));
-        call.setDisplayPhoneNumber(blankToNull(displayPhoneNumber));
-        call.setStartTime(startTime);
-        call.setEndTime(endTime);
-        call.setDurationSeconds(durationSeconds);
+        if (hasText(sessionSdpType)) {
+            call.setSessionSdpType(blankToNull(sessionSdpType));
+        }
+        if (hasText(sessionSdp)) {
+            call.setSessionSdp(blankToNull(sessionSdp));
+        }
+        if (hasText(phoneNumberId)) {
+            call.setPhoneNumberId(blankToNull(phoneNumberId));
+        }
+        if (hasText(displayPhoneNumber)) {
+            call.setDisplayPhoneNumber(blankToNull(displayPhoneNumber));
+        }
+        if (startTime != null) {
+            call.setStartTime(startTime);
+        }
+        if (endTime != null) {
+            call.setEndTime(endTime);
+        }
+        if (durationSeconds != null) {
+            call.setDurationSeconds(durationSeconds);
+        }
         call.setRawPayloadJson(rawPayloadJson);
+        maybeRecordPermissionFromInboundCall(call);
         return whatsAppCallRepository.save(call);
     }
 
@@ -84,8 +104,101 @@ public class WhatsAppCallingService {
         call.setEvent("permission_requested");
         call.setPermissionRequestedBy(agentEmail);
         call.setPermissionRequestedAt(Instant.now());
+        call.setPermissionStatus(PERMISSION_REQUESTED);
+        call.setPermissionStatusUpdatedAt(Instant.now());
+        call.setPermissionExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
+        call.setPermissionSource("agent_request");
         call.setExternalMessageId(externalMessageId);
         return whatsAppCallRepository.save(call);
+    }
+
+    @Transactional
+    public WhatsAppCall recordPermissionStatus(String phoneNumber, String status, String source) {
+        String normalizedPhone = normalizePhone(phoneNumber);
+        Optional<String> customerId = findCustomerId(normalizedPhone);
+        WhatsAppCall call = latestPermissionRecord(customerId.orElse(null), normalizedPhone)
+                .orElseGet(WhatsAppCall::new);
+        if (call.getCallId() == null) {
+            call.setCallId("permission-" + UUID.randomUUID());
+        }
+        call.setCustomerId(customerId.orElse(call.getCustomerId()));
+        call.setPhoneNumber(normalizedPhone);
+        call.setToPhone(normalizedPhone);
+        call.setDirection("BUSINESS_INITIATED");
+        call.setEvent("permission_status");
+        call.setPermissionStatus(normalizePermissionStatus(status));
+        call.setPermissionStatusUpdatedAt(Instant.now());
+        call.setPermissionExpiresAt(permissionExpiryForStatus(call.getPermissionStatus(), call.getPermissionStatusUpdatedAt()));
+        call.setPermissionSource(blankToNull(source));
+        return whatsAppCallRepository.save(call);
+    }
+
+    @Transactional
+    public Optional<WhatsAppCall> capturePermissionReply(String customerId, String phoneNumber, String messageBody) {
+        PermissionState permissionState = currentPermissionState(customerId);
+        if (!PERMISSION_REQUESTED.equalsIgnoreCase(permissionState.status())) {
+            return Optional.empty();
+        }
+        String decision = interpretPermissionReply(messageBody);
+        if (decision == null) {
+            return Optional.empty();
+        }
+        return Optional.of(recordPermissionStatus(phoneNumber, decision, "customer_reply"));
+    }
+
+    @Transactional(readOnly = true)
+    public PermissionState currentPermissionState(String customerId) {
+        return latestPermissionRecord(customerId, null)
+                .map(this::toPermissionState)
+                .orElse(PermissionState.none());
+    }
+
+    @Transactional
+    public WhatsAppCallControlDto initiateOutgoingCall(
+            String customerId,
+            String phoneNumber,
+            String sdpType,
+            String sdp,
+            String actorEmail) {
+        PermissionState permissionState = currentPermissionState(customerId);
+        if (!permissionState.granted()) {
+            throw new ValidationException("WhatsApp call permission is not granted yet.");
+        }
+        if (!"offer".equalsIgnoreCase(blankToNull(sdpType)) || !hasText(sdp)) {
+            throw new ValidationException("Outbound WhatsApp call requires a WebRTC SDP offer.");
+        }
+        String normalizedPhone = normalizePhone(phoneNumber);
+        String callbackData = "customer:" + customerId + ":" + UUID.randomUUID();
+        try {
+            MetaWhatsAppCloudApiClient.CallInitiationResult result =
+                    metaWhatsAppCloudApiClient.initiateCall(normalizedPhone, sdpType, sdp, callbackData);
+            WhatsAppCall call = whatsAppCallRepository.findByCallId(result.callId()).orElseGet(WhatsAppCall::new);
+            call.setCallId(result.callId());
+            call.setCustomerId(customerId);
+            call.setPhoneNumber(normalizedPhone);
+            call.setToPhone(normalizedPhone);
+            call.setDirection("BUSINESS_INITIATED");
+            call.setEvent("connect_requested");
+            call.setStatus("INITIATED");
+            call.setSessionSdpType(blankToNull(sdpType));
+            call.setSessionSdp(blankToNull(sdp));
+            call.setPhoneNumberId(blankToNull(result.phoneNumberId()));
+            call.setInitiatedBy(actorEmail);
+            call.setInitiatedAt(Instant.now());
+            call.setBizOpaqueCallbackData(callbackData);
+            call.setPermissionStatus(permissionState.status());
+            call.setPermissionStatusUpdatedAt(permissionState.updatedAt());
+            call.setPermissionExpiresAt(permissionState.expiresAt());
+            call.setPermissionSource("outbound_call");
+            call.setRawPayloadJson(result.rawResponseBody());
+            return toControlDto(whatsAppCallRepository.save(call));
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new ValidationException("WhatsApp outbound call was interrupted");
+        } catch (IOException ex) {
+            log.warn("WhatsApp outbound call initiation failed for customer {}: {}", customerId, ex.getMessage(), ex);
+            throw new ValidationException("WhatsApp outbound call failed: " + ex.getMessage());
+        }
     }
 
     @Transactional(readOnly = true)
@@ -218,6 +331,7 @@ public class WhatsAppCallingService {
                 call.getStatus(),
                 call.getDirection(),
                 call.getEvent(),
+                call.getPermissionStatus(),
                 call.getSessionSdpType(),
                 call.getSessionSdp() != null && !call.getSessionSdp().isBlank(),
                 call.getUpdatedAt());
@@ -235,6 +349,9 @@ public class WhatsAppCallingService {
                 call.getEvent(),
                 call.getSessionSdpType(),
                 call.getSessionSdp(),
+                call.getPermissionStatus(),
+                call.getPermissionStatusUpdatedAt(),
+                call.getPermissionExpiresAt(),
                 call.getPhoneNumberId(),
                 call.getDisplayPhoneNumber(),
                 call.getSessionSdp() != null && !call.getSessionSdp().isBlank()
@@ -247,6 +364,86 @@ public class WhatsAppCallingService {
                         && !"REJECTED".equalsIgnoreCase(call.getStatus())
                         && !"TERMINATED".equalsIgnoreCase(call.getStatus()),
                 call.getUpdatedAt());
+    }
+
+    private Optional<WhatsAppCall> latestPermissionRecord(String customerId, String phoneNumber) {
+        return whatsAppCallRepository.findTop50ByOrderByUpdatedAtDesc().stream()
+                .filter(call -> call.getPermissionStatus() != null || call.getPermissionRequestedAt() != null)
+                .filter(call -> customerId == null || customerId.equals(call.getCustomerId()) || matchesPhone(call, phoneNumber))
+                .filter(call -> phoneNumber == null || matchesPhone(call, phoneNumber))
+                .max(java.util.Comparator.comparing(WhatsAppCall::getUpdatedAt));
+    }
+
+    private PermissionState toPermissionState(WhatsAppCall call) {
+        String status = normalizePermissionStatus(call.getPermissionStatus());
+        Instant updatedAt = call.getPermissionStatusUpdatedAt() != null
+                ? call.getPermissionStatusUpdatedAt()
+                : call.getPermissionRequestedAt();
+        if (status == null && call.getPermissionRequestedAt() != null) {
+            status = PERMISSION_REQUESTED;
+        }
+        Instant expiresAt = call.getPermissionExpiresAt() != null
+                ? call.getPermissionExpiresAt()
+                : permissionExpiryForStatus(status, updatedAt);
+        if (expiresAt != null && expiresAt.isBefore(Instant.now()) && PERMISSION_GRANTED.equalsIgnoreCase(status)) {
+            status = "EXPIRED";
+        }
+        boolean granted = PERMISSION_GRANTED.equalsIgnoreCase(status)
+                && expiresAt != null
+                && expiresAt.isAfter(Instant.now());
+        return new PermissionState(status, updatedAt, expiresAt, granted);
+    }
+
+    private void maybeRecordPermissionFromInboundCall(WhatsAppCall call) {
+        if (call == null) {
+            return;
+        }
+        if ("USER_INITIATED".equalsIgnoreCase(call.getDirection())
+                && "connect".equalsIgnoreCase(call.getEvent())
+                && hasText(call.getPhoneNumber())) {
+            call.setPermissionStatus(PERMISSION_GRANTED);
+            call.setPermissionStatusUpdatedAt(Instant.now());
+            call.setPermissionExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
+            call.setPermissionSource("user_initiated_call");
+        }
+    }
+
+    private static Instant permissionExpiryForStatus(String status, Instant reference) {
+        if (reference == null || status == null) {
+            return null;
+        }
+        return switch (status.toUpperCase(java.util.Locale.ROOT)) {
+            case PERMISSION_GRANTED, PERMISSION_REJECTED, PERMISSION_REQUESTED, PERMISSION_REVOKED -> reference.plus(7, ChronoUnit.DAYS);
+            default -> reference;
+        };
+    }
+
+    private static String interpretPermissionReply(String body) {
+        String normalized = blankToNull(body);
+        if (normalized == null) {
+            return null;
+        }
+        String lowered = normalized.toLowerCase(java.util.Locale.ROOT);
+        if (lowered.matches(".*\\b(granted|yes|sure|okay|ok|call me|you can call|please call)\\b.*")) {
+            return PERMISSION_GRANTED;
+        }
+        if (lowered.matches(".*\\b(rejected|no|don't call|do not call|not now|later)\\b.*")) {
+            return PERMISSION_REJECTED;
+        }
+        return null;
+    }
+
+    private static String normalizePermissionStatus(String value) {
+        String normalized = blankToNull(value);
+        return normalized == null ? null : normalized.toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private boolean matchesPhone(WhatsAppCall call, String phoneNumber) {
+        String normalizedPhone = normalizePhone(phoneNumber);
+        return normalizedPhone != null
+                && (normalizedPhone.equals(normalizePhone(call.getPhoneNumber()))
+                || normalizedPhone.equals(normalizePhone(call.getFromPhone()))
+                || normalizedPhone.equals(normalizePhone(call.getToPhone())));
     }
 
     private Optional<String> resolveCustomerId(String fromPhone, String toPhone) {
@@ -290,8 +487,15 @@ public class WhatsAppCallingService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
     private boolean isCurrentCall(WhatsAppCall call) {
         if (call == null) {
+            return false;
+        }
+        if ("permission_status".equalsIgnoreCase(blankToNull(call.getEvent()))) {
             return false;
         }
         String status = blankToNull(call.getStatus());
@@ -322,5 +526,11 @@ public class WhatsAppCallingService {
         return customerPhones.contains(normalizePhone(call.getPhoneNumber()))
                 || customerPhones.contains(normalizePhone(call.getFromPhone()))
                 || customerPhones.contains(normalizePhone(call.getToPhone()));
+    }
+
+    public record PermissionState(String status, Instant updatedAt, Instant expiresAt, boolean granted) {
+        static PermissionState none() {
+            return new PermissionState(null, null, null, false);
+        }
     }
 }
