@@ -87,7 +87,12 @@ public class MetaWhatsAppWebhookService {
             return 0;
         }
         String rawCallPayload = buildRawCallPayload(call, metadata);
-        log.info("Received Meta WhatsApp call webhook {} payload={}", callId, truncateForLog(rawCallPayload));
+        log.info(
+                "Received Meta WhatsApp call webhook {} event={} status={} direction={}",
+                callId,
+                blankToNull(call.path("event").asText()),
+                blankToNull(call.path("status").asText()),
+                blankToNull(call.path("direction").asText()));
         whatsAppCallingService.recordWebhookEvent(
                 callId,
                 blankToNull(call.path("from").asText()),
@@ -302,17 +307,6 @@ public class MetaWhatsAppWebhookService {
         } catch (NumberFormatException ex) {
             return null;
         }
-    }
-
-    private static String truncateForLog(String value) {
-        if (value == null) {
-            return "";
-        }
-        int max = 4000;
-        if (value.length() <= max) {
-            return value;
-        }
-        return value.substring(0, max) + "...(truncated)";
     }
 
     public record MetaWebhookResult(int processedMessages, int processedCallEvents) {}

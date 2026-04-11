@@ -241,21 +241,19 @@ public class MetaWhatsAppCloudApiClient {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             log.warn(
-                    "WhatsApp call action HTTP failure action={} callId={} phoneNumberId={} status={} body={}",
+                    "WhatsApp call action HTTP failure action={} callId={} phoneNumberId={} status={}",
                     action,
                     callId,
                     effectivePhoneNumberId,
-                    response.statusCode(),
-                    response.body());
+                    response.statusCode());
             throw new IOException("WhatsApp call action failed: " + response.statusCode() + " " + response.body());
         }
         log.info(
-                "WhatsApp call action succeeded action={} callId={} phoneNumberId={} status={} body={}",
+                "WhatsApp call action succeeded action={} callId={} phoneNumberId={} status={}",
                 action,
                 callId,
                 effectivePhoneNumberId,
-                response.statusCode(),
-                response.body());
+                response.statusCode());
     }
 
     private String graphBaseUrl() {

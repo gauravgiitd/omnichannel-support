@@ -106,11 +106,6 @@
                             <div class="subpanel-head">
                                 <h4>Conversation JTBD control</h4>
                             </div>
-                            <p class="small-note" id="agentWhatsAppCallNote">WhatsApp calling is not configured yet for this customer.</p>
-                            <div class="stack-form compact">
-                                <p class="small-note" id="agentWhatsAppWebhookPath">Webhook endpoint: /webhooks/meta/whatsapp</p>
-                                <button type="button" id="requestWhatsAppCallPermission">Request WhatsApp call permission</button>
-                            </div>
                             <form id="agentCreateJtbdForm" class="stack-form compact">
                                 <label>
                                     Create new JTBD
@@ -124,9 +119,13 @@
 
                         <div class="subpanel">
                             <div class="subpanel-head">
-                                <h4>Current WhatsApp call</h4>
+                                <h4>WhatsApp calling</h4>
                             </div>
-                            <p class="small-note" id="agentWhatsAppCallState">Incoming WhatsApp calls can be answered here through the browser when a call offer is available.</p>
+                            <div class="actions-inline">
+                                <button type="button" id="requestWhatsAppCallPermission">Request WhatsApp call permission</button>
+                                <button type="button" id="startOutgoingWhatsAppCall">Start outgoing WhatsApp call</button>
+                            </div>
+                            <p class="small-note" id="agentWhatsAppCallState">Use this section to answer incoming WhatsApp calls or prepare an outgoing WhatsApp call after permission is in place.</p>
                             <div id="agentWhatsAppCallEvents" class="queue-stack empty-state">No active WhatsApp call right now.</div>
                             <audio id="agentWhatsAppRemoteAudio" autoplay playsinline></audio>
                         </div>

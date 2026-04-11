@@ -121,6 +121,33 @@ function bindControls() {
             renderAgentWhatsAppCallEvents();
         }
     });
+    bindClick("startOutgoingWhatsAppCall", async () => {
+        ensureAgentCustomerSelected();
+        if (!state.agentWorkspace?.primary_phone) {
+            throw new Error("This customer does not have a WhatsApp number yet.");
+        }
+        const activeCall = currentWhatsAppCall();
+        if (activeCall) {
+            throw new Error("There is already an active WhatsApp call for this customer.");
+        }
+        if (!hasRecentWhatsAppCallPermissionRequest()) {
+            await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/permission`, {
+                method: "POST"
+            });
+            pushEvent(
+                "WhatsApp call permission requested",
+                `Permission was requested on WhatsApp for ${state.agentWorkspace.primary_phone} before starting an outgoing call.`
+            );
+            text("agentWhatsAppCallState", "Permission request sent. Start the outgoing WhatsApp call after the customer confirms.");
+            await refreshBoard(state.agentCustomerFilter);
+            return;
+        }
+        text("agentWhatsAppCallState", `Outgoing WhatsApp call is ready for ${state.agentWorkspace.primary_phone}. Permission has already been requested.`);
+        pushEvent(
+            "Outgoing WhatsApp call ready",
+            `Permission has already been requested for ${state.agentWorkspace.primary_phone}. You can now proceed with the outbound calling flow.`
+        );
+    });
     const agentCustomerFilter = el("agentCustomerFilter");
     if (agentCustomerFilter) {
         agentCustomerFilter.addEventListener("change", (event) => {
@@ -909,19 +936,6 @@ function renderAgentWorkspace() {
             ? "Full conversation is visible here. Narrow to a domain when you want a focused working view."
             : `Domain-focused view on ${state.agentDomainFilter}. Switch back to All domains for the full conversation.`;
     }
-    text(
-        "agentWhatsAppCallNote",
-        state.agentWorkspace.whatsapp_calling_enabled
-            ? `WhatsApp calling is enabled for ${state.agentWorkspace.primary_phone}. Incoming call events from Meta will appear here, and browser answering is available when the call event includes a WebRTC offer.`
-            : `WhatsApp calling is not configured yet${state.agentWorkspace.primary_phone ? ` for ${state.agentWorkspace.primary_phone}` : " for this customer"}.`
-    );
-    text(
-        "agentWhatsAppWebhookPath",
-        state.agentWorkspace.whatsapp_webhook_path
-            ? `Webhook endpoint: ${state.agentWorkspace.whatsapp_webhook_path}`
-            : "Webhook endpoint is not configured yet."
-    );
-
     const filteredMessages = filteredAgentMessages();
     const filteredDocuments = filteredAgentDocuments();
     text("timelineCount", `${filteredMessages.length} messages in view`);
@@ -1199,37 +1213,35 @@ function renderAgentWhatsAppCallEvents() {
     });
 }
 
+function currentWhatsAppCall() {
+    const calls = state.agentWorkspace?.recent_whats_app_calls
+        || state.agentWorkspace?.recent_whatsapp_calls
+        || [];
+    return calls[0] || null;
+}
+
+function hasRecentWhatsAppCallPermissionRequest() {
+    const messages = state.agentWorkspace?.messages || [];
+    return messages.some((message) =>
+        message.channel === "WHATSAPP"
+        && message.sender_type === "AGENT"
+        && message.metadata?.source === "agent_whatsapp_call_permission_request");
+}
+
 async function answerWhatsAppCall(callId) {
     ensureAgentCustomerSelected();
-    console.info("[wa-call] answer start", { customerId: state.agentCustomerFilter, callId });
     const call = (await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}`)).data;
-    console.info("[wa-call] control payload loaded", {
-        callId,
-        status: call.status,
-        event: call.event,
-        sessionSdpType: call.session_sdp_type,
-        hasSessionSdp: Boolean(call.session_sdp)
-    });
     if (!call.session_sdp) {
         throw new Error("This call does not include a WebRTC offer yet.");
     }
     await closeActiveWebRtcCall();
-    console.info("[wa-call] requesting microphone access", { callId });
     const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    console.info("[wa-call] microphone access granted", { callId, tracks: localStream.getTracks().length });
     const remoteStream = new MediaStream();
     const peerConnection = new RTCPeerConnection({
         iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
     });
-    peerConnection.oniceconnectionstatechange = () => {
-        console.info("[wa-call] ice connection state", { callId, state: peerConnection.iceConnectionState });
-    };
-    peerConnection.onconnectionstatechange = () => {
-        console.info("[wa-call] peer connection state", { callId, state: peerConnection.connectionState });
-    };
     localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
     peerConnection.ontrack = (event) => {
-        console.info("[wa-call] remote track received", { callId, streams: event.streams.length });
         event.streams.forEach((stream) => {
             stream.getTracks().forEach((track) => remoteStream.addTrack(track));
         });
@@ -1238,7 +1250,6 @@ async function answerWhatsAppCall(callId) {
             audio.srcObject = remoteStream;
         }
     };
-    console.info("[wa-call] setting remote description", { callId });
     const normalizedRemoteSdp = normalizeWebRtcSdp(call.session_sdp);
     try {
         await peerConnection.setRemoteDescription({
@@ -1246,28 +1257,12 @@ async function answerWhatsAppCall(callId) {
             sdp: normalizedRemoteSdp
         });
     } catch (error) {
-        console.error("[wa-call] setRemoteDescription failed", {
-            callId,
-            error: error?.message || String(error),
-            sessionSdpType: call.session_sdp_type || "offer",
-            sessionSdpLength: normalizedRemoteSdp?.length || 0,
-            sessionSdpPreview: normalizedRemoteSdp?.slice(0, 500) || ""
-        });
         throw new Error(`WebRTC remote description failed: ${error?.message || error}`);
     }
-    console.info("[wa-call] remote description set", { callId });
     const answer = await peerConnection.createAnswer();
-    console.info("[wa-call] answer created", { callId, type: answer.type, sdpLength: answer.sdp?.length || 0 });
     await peerConnection.setLocalDescription(answer);
-    console.info("[wa-call] local description set", { callId });
     await waitForIceGatheringComplete(peerConnection);
     const localDescription = peerConnection.localDescription;
-    console.info("[wa-call] ice gathering complete", {
-        callId,
-        localType: localDescription?.type,
-        localSdpLength: localDescription?.sdp?.length || 0
-    });
-    console.info("[wa-call] sending pre-accept", { callId });
     await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}/pre-accept`, {
         method: "POST",
         body: {
@@ -1276,8 +1271,6 @@ async function answerWhatsAppCall(callId) {
             sdp: localDescription.sdp
         }
     });
-    console.info("[wa-call] pre-accept succeeded", { callId });
-    console.info("[wa-call] sending accept", { callId });
     await api(`/v1/agent/customers/${encodeURIComponent(state.agentCustomerFilter)}/whatsapp-calls/${encodeURIComponent(callId)}/accept`, {
         method: "POST",
         body: {
@@ -1286,7 +1279,6 @@ async function answerWhatsAppCall(callId) {
             sdp: localDescription.sdp
         }
     });
-    console.info("[wa-call] accept succeeded", { callId });
     state.webRtcCall = {
         peerConnection,
         localStream,
