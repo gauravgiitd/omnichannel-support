@@ -68,6 +68,7 @@ public class MetaWhatsAppWebhookService {
                             messageId,
                             blankToNull(message.path("type").asText()),
                             message.toString());
+                    processedCallEvents += processPermissionReplyMessage(message);
                     if (messageRepository.findByExternalThreadRef(messageId).isPresent()) {
                         continue;
                     }
@@ -128,6 +129,38 @@ public class MetaWhatsAppWebhookService {
                 "SYSTEM",
                 "meta-whatsapp-webhook",
                 buildCallAuditPayload(call));
+        return 1;
+    }
+
+    private int processPermissionReplyMessage(JsonNode message) {
+        if (!"interactive".equalsIgnoreCase(message.path("type").asText())) {
+            return 0;
+        }
+        JsonNode reply = message.path("interactive").path("call_permission_reply");
+        if (reply.isMissingNode() || reply.isNull()) {
+            return 0;
+        }
+        String from = blankToNull(message.path("from").asText());
+        String response = blankToNull(reply.path("response").asText());
+        if (from == null || response == null) {
+            return 0;
+        }
+        String normalizedStatus = switch (response.toLowerCase(java.util.Locale.ROOT)) {
+            case "accept", "accepted", "grant", "granted" -> "GRANTED";
+            case "reject", "rejected", "decline", "declined" -> "REJECTED";
+            case "revoke", "revoked" -> "REVOKED";
+            default -> null;
+        };
+        if (normalizedStatus == null) {
+            return 0;
+        }
+        Instant expiresAt = parseEpochSeconds(reply.path("expiration_timestamp").asText(null));
+        log.info(
+                "Resolved WhatsApp call permission reply from={} response={} expiresAt={}",
+                normalizePhone(from),
+                normalizedStatus,
+                expiresAt);
+        whatsAppCallingService.recordPermissionStatus(normalizePhone(from), normalizedStatus, "meta_webhook", expiresAt);
         return 1;
     }
 

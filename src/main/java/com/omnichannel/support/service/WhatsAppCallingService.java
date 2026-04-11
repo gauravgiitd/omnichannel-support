@@ -114,6 +114,11 @@ public class WhatsAppCallingService {
 
     @Transactional
     public WhatsAppCall recordPermissionStatus(String phoneNumber, String status, String source) {
+        return recordPermissionStatus(phoneNumber, status, source, null);
+    }
+
+    @Transactional
+    public WhatsAppCall recordPermissionStatus(String phoneNumber, String status, String source, Instant expiresAt) {
         String normalizedPhone = normalizePhone(phoneNumber);
         Optional<String> customerId = findCustomerId(normalizedPhone);
         WhatsAppCall call = latestPermissionRecord(customerId.orElse(null), normalizedPhone)
@@ -128,7 +133,9 @@ public class WhatsAppCallingService {
         call.setEvent("permission_status");
         call.setPermissionStatus(normalizePermissionStatus(status));
         call.setPermissionStatusUpdatedAt(Instant.now());
-        call.setPermissionExpiresAt(permissionExpiryForStatus(call.getPermissionStatus(), call.getPermissionStatusUpdatedAt()));
+        call.setPermissionExpiresAt(expiresAt != null
+                ? expiresAt
+                : permissionExpiryForStatus(call.getPermissionStatus(), call.getPermissionStatusUpdatedAt()));
         call.setPermissionSource(blankToNull(source));
         return whatsAppCallRepository.save(call);
     }
