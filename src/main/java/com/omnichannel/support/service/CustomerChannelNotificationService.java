@@ -12,11 +12,15 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
 public class CustomerChannelNotificationService {
+
+    private static final Logger log = LoggerFactory.getLogger(CustomerChannelNotificationService.class);
 
     private final ObjectProvider<JavaMailSender> mailSenderProvider;
     private final MetaWhatsAppCloudApiClient metaWhatsAppCloudApiClient;
@@ -130,7 +134,14 @@ public class CustomerChannelNotificationService {
                             "template", templateName,
                             "template_language", languageCode));
         } catch (Exception ex) {
-            throw new ValidationException("failed to send WhatsApp template notification");
+            log.warn(
+                    "Failed to send WhatsApp template recipient={} template={} language={}: {}",
+                    recipient,
+                    templateName,
+                    languageCode,
+                    ex.getMessage(),
+                    ex);
+            throw new ValidationException("failed to send WhatsApp template notification: " + ex.getMessage());
         }
     }
 
