@@ -63,6 +63,11 @@ public class MetaWhatsAppWebhookService {
                         continue;
                     }
                     String messageId = message.path("id").asText();
+                    log.info(
+                            "Received Meta WhatsApp message payload id={} type={} payload={}",
+                            messageId,
+                            blankToNull(message.path("type").asText()),
+                            message.toString());
                     if (messageRepository.findByExternalThreadRef(messageId).isPresent()) {
                         continue;
                     }
