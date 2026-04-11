@@ -49,6 +49,10 @@ public class MetaWhatsAppWebhookService {
         for (JsonNode entry : payload.path("entry")) {
             for (JsonNode change : entry.path("changes")) {
                 JsonNode value = change.path("value");
+                log.info(
+                        "Received Meta WhatsApp webhook change field={} keys={}",
+                        blankToNull(change.path("field").asText()),
+                        value.isObject() ? iterableFieldNames(value).toString() : "[]");
                 if (!"whatsapp_business_account".equals(payload.path("object").asText())
                         && !"whatsapp".equals(value.path("messaging_product").asText("whatsapp"))) {
                     continue;
@@ -379,6 +383,15 @@ public class MetaWhatsAppWebhookService {
             }
         }
         return null;
+    }
+
+    private static java.util.List<String> iterableFieldNames(JsonNode node) {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        if (node == null || !node.isObject()) {
+            return names;
+        }
+        node.fieldNames().forEachRemaining(names::add);
+        return names;
     }
 
     public record MetaWebhookResult(int processedMessages, int processedCallEvents) {}
