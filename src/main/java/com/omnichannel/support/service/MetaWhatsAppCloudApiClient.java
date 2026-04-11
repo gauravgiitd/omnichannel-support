@@ -217,14 +217,6 @@ public class MetaWhatsAppCloudApiClient {
     public String sendTemplateMessage(String toPhoneNumber, String templateName, String languageCode)
             throws IOException, InterruptedException {
         String normalizedPhone = normalizeRecipient(toPhoneNumber);
-        java.util.Map<String, Object> template = new java.util.LinkedHashMap<>();
-        template.put("name", templateName);
-        template.put("language", Map.of("code", languageCode));
-        template.put("components", java.util.List.of(
-                Map.of(
-                        "type", "body",
-                        "parameters", java.util.List.of(
-                                Map.of("type", "text", "text", "ACKO")))));
         HttpRequest request = HttpRequest.newBuilder(
                         URI.create(graphBaseUrl() + "/" + urlEncode(properties.getPhoneNumberId()) + "/messages"))
                 .timeout(Duration.ofSeconds(20))
@@ -234,7 +226,9 @@ public class MetaWhatsAppCloudApiClient {
                         "messaging_product", "whatsapp",
                         "to", normalizedPhone,
                         "type", "template",
-                        "template", template))))
+                        "template", Map.of(
+                                "name", templateName,
+                                "language", Map.of("code", languageCode))))))
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
