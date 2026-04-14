@@ -48,6 +48,7 @@ public class CustomerRequestService {
     private final ConversationService conversationService;
     private final DocumentService documentService;
     private final DocumentLinkService documentLinkService;
+    private final WhatsAppCallingService whatsAppCallingService;
 
     @Transactional(readOnly = true)
     public List<CustomerRequestDto> listRequestsForCustomer(String customerId) {
@@ -66,10 +67,14 @@ public class CustomerRequestService {
     @Transactional(readOnly = true)
     public List<MessageDto> listMessages(String customerId, String requestId) {
         RequestAggregate aggregate = resolveRequest(customerId, requestId);
-        if (CustomerRequestIds.isConversationRequest(requestId)) {
-            return conversationService.listCustomerVisibleTimeline(aggregate.conversation);
-        }
-        return conversationService.listCustomerVisibleTimeline(aggregate.conversation, aggregate.customerJtbd);
+        List<MessageDto> baseMessages = CustomerRequestIds.isConversationRequest(requestId)
+                ? conversationService.listCustomerVisibleTimeline(aggregate.conversation)
+                : conversationService.listCustomerVisibleTimeline(aggregate.conversation, aggregate.customerJtbd);
+        return java.util.stream.Stream.concat(
+                        baseMessages.stream(),
+                        whatsAppCallingService.listTimelineEntriesForCustomer(customerId).stream())
+                .sorted(Comparator.comparing(MessageDto::createdAt))
+                .toList();
     }
 
     @Transactional(readOnly = true)

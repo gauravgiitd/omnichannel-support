@@ -926,7 +926,7 @@ function renderAgentWorkspace() {
     }
     const filteredMessages = filteredAgentMessages();
     const filteredDocuments = filteredAgentDocuments();
-    text("timelineCount", `${filteredMessages.length} messages in view`);
+    text("timelineCount", `${filteredMessages.length} timeline items in view`);
     text("documentCount", `${filteredDocuments.length} docs`);
     renderChatThread("messageTimeline", filteredMessages, false);
     renderDocumentsFromList("documentList", filteredDocuments, "Documents shared from any channel appear here.");
@@ -1651,7 +1651,7 @@ function renderChatThreadInElement(container, messages, customerView) {
     if (!messages.length) {
         container.className = `chat-thread ${customerView ? "customer-view" : "agent-view"} empty-state`;
         container.textContent = customerView
-            ? "No conversation yet."
+            ? "No conversation or call activity yet."
             : "Select a task to load the full conversation.";
         return;
     }
@@ -1698,7 +1698,7 @@ function buildMessageNode(message, customerView) {
         `<span class="small-note">${escapeHtml(senderMeta.detail)}</span>`,
         `<span class="small-note">${formatDate(message.created_at)}</span>`
     ].join("");
-    node.querySelector(".bubble-body").textContent = readableMessageBody(message);
+    node.querySelector(".bubble-body").textContent = readableMessageBody(message, customerView);
 
     const attachments = [
         ...(message.attachment_urls || []).map((url) => `<a class="document-link" href="${url}" target="_blank" rel="noreferrer">${customerView ? "Open file" : "Attachment"}</a>`),
@@ -1708,8 +1708,11 @@ function buildMessageNode(message, customerView) {
     return node;
 }
 
-function readableMessageBody(message) {
+function readableMessageBody(message, customerView) {
     const metadata = message.metadata || {};
+    if (metadata.timeline_item_type === "whatsapp_call") {
+        return readableWhatsAppCallBody(message, customerView);
+    }
     if (message.channel === "WHATSAPP" && metadata.wa_interactive_type === "call_permission_reply") {
         const response = `${metadata.wa_call_permission_response || ""}`.toLowerCase();
         if (response === "accept") {
@@ -1723,6 +1726,51 @@ function readableMessageBody(message) {
         }
     }
     return message.body || "";
+}
+
+function readableWhatsAppCallBody(message, customerView) {
+    const metadata = message.metadata || {};
+    const status = `${metadata.wa_call_status || ""}`.toUpperCase();
+    const durationSeconds = Number(metadata.wa_call_duration_seconds || 0);
+    const actor = customerView
+        ? message.sender_type === "CUSTOMER"
+            ? "You"
+            : message.sender_type === "AGENT"
+                ? "Support"
+                : "Someone"
+        : message.sender_type === "CUSTOMER"
+            ? "Customer"
+            : message.sender_type === "AGENT"
+                ? "Support"
+                : "Someone";
+    if (status === "COMPLETED") {
+        return durationSeconds > 0
+            ? `${actor} completed a WhatsApp call (${formatCallDuration(durationSeconds)}).`
+            : `${actor} completed a WhatsApp call.`;
+    }
+    if (status === "REJECTED") {
+        return `${actor} declined a WhatsApp call.`;
+    }
+    if (status === "FAILED") {
+        return `${actor} had a WhatsApp call fail.`;
+    }
+    if (status === "TERMINATED") {
+        return `${actor} ended a WhatsApp call.`;
+    }
+    if (status === "ACCEPTED" || status === "PRE_ACCEPTED") {
+        return `${actor} answered a WhatsApp call.`;
+    }
+    return `${actor} started a WhatsApp call.`;
+}
+
+function formatCallDuration(durationSeconds) {
+    const totalSeconds = Math.max(0, Number(durationSeconds) || 0);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+    }
+    return `${seconds}s`;
 }
 
 function renderSenderMeta(message, customerView) {
@@ -2284,7 +2332,10 @@ function filteredAgentMessages() {
     }
     const taskIds = new Set(filteredAgentTasks().map((task) => task.task_id));
     const jtbdIds = new Set(filteredAgentJtbds().map((jtbd) => jtbd.public_id));
-    return all.filter((message) => taskIds.has(message.task_id) || (message.customer_jtbd_id && jtbdIds.has(message.customer_jtbd_id)));
+    return all.filter((message) =>
+        (message.metadata || {}).timeline_item_type === "whatsapp_call"
+        || taskIds.has(message.task_id)
+        || (message.customer_jtbd_id && jtbdIds.has(message.customer_jtbd_id)));
 }
 
 function filteredAgentDocuments() {

@@ -78,7 +78,9 @@ public class AgentWorkspaceService {
                 .map(taskService::toDtoView)
                 .toList();
         List<CustomerJtbdDto> jtbds = jtbdService.listCustomerJtbds(customerId);
-        List<MessageDto> messages = conversationService.listCustomerVisibleTimeline(conversation);
+        List<MessageDto> messages = mergeTimelineWithCalls(
+                customerId,
+                conversationService.listCustomerVisibleTimeline(conversation));
         List<DocumentDto> documents = documentService.listCustomerVisibleByConversation(conversation, null);
         List<CustomerIdentityLink> identityLinks = customerIdentityLinkRepository.findByCustomerId(customerId);
 
@@ -143,6 +145,14 @@ public class AgentWorkspaceService {
                                 session.getStartAt(),
                                 session.getEndAt()))
                         .toList());
+    }
+
+    private List<MessageDto> mergeTimelineWithCalls(String customerId, List<MessageDto> baseMessages) {
+        return java.util.stream.Stream.concat(
+                        baseMessages.stream(),
+                        whatsAppCallingService.listTimelineEntriesForCustomer(customerId).stream())
+                .sorted(Comparator.comparing(MessageDto::createdAt))
+                .toList();
     }
 
     @Transactional

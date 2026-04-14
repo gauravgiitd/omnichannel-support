@@ -2,7 +2,10 @@ package com.omnichannel.support.service;
 
 import com.omnichannel.support.domain.CustomerIdentityLink;
 import com.omnichannel.support.domain.IdentifierType;
+import com.omnichannel.support.domain.ChannelType;
+import com.omnichannel.support.domain.SenderType;
 import com.omnichannel.support.domain.WhatsAppCall;
+import com.omnichannel.support.dto.MessageDto;
 import com.omnichannel.support.dto.WhatsAppCallControlDto;
 import com.omnichannel.support.dto.WhatsAppCallEventDto;
 import com.omnichannel.support.error.NotFoundException;
@@ -12,8 +15,10 @@ import com.omnichannel.support.repo.CustomerIdentityLinkRepository;
 import com.omnichannel.support.repo.WhatsAppCallRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -208,6 +213,23 @@ public class WhatsAppCallingService {
                 .filter(this::isCurrentCall)
                 .limit(1)
                 .map(this::toEventDto)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageDto> listTimelineEntriesForCustomer(String customerId) {
+        Set<String> customerPhones = customerPhones(customerId);
+        LinkedHashMap<String, WhatsAppCall> callsById = new LinkedHashMap<>();
+        whatsAppCallRepository.findByCustomerId(customerId).forEach(call -> callsById.put(call.getCallId(), call));
+        customerPhones.forEach(phone -> whatsAppCallRepository.findByPhoneNumberOrderByUpdatedAtDesc(phone)
+                .forEach(call -> callsById.putIfAbsent(call.getCallId(), call)));
+        whatsAppCallRepository.findTop50ByOrderByUpdatedAtDesc().stream()
+                .filter(call -> matchesCustomerPhones(call, customerPhones))
+                .forEach(call -> callsById.putIfAbsent(call.getCallId(), call));
+        return callsById.values().stream()
+                .filter(this::shouldAppearInConversationTimeline)
+                .sorted(Comparator.comparing(this::timelineOccurredAt))
+                .map(this::toTimelineMessageDto)
                 .toList();
     }
 
@@ -474,6 +496,114 @@ public class WhatsAppCallingService {
                 || "REJECTED".equalsIgnoreCase(status)
                 || "TERMINATED".equalsIgnoreCase(status)
                 || "terminate".equalsIgnoreCase(event));
+    }
+
+    private boolean shouldAppearInConversationTimeline(WhatsAppCall call) {
+        if (call == null || call.getCallId() == null || call.getCallId().startsWith("permission-")) {
+            return false;
+        }
+        String event = blankToNull(call.getEvent());
+        String status = blankToNull(call.getStatus());
+        return !("permission_requested".equalsIgnoreCase(event)
+                || "permission_status".equalsIgnoreCase(event)
+                || "PERMISSION_REQUESTED".equalsIgnoreCase(status));
+    }
+
+    private MessageDto toTimelineMessageDto(WhatsAppCall call) {
+        SenderType senderType = "BUSINESS_INITIATED".equalsIgnoreCase(blankToNull(call.getDirection()))
+                ? SenderType.AGENT
+                : "USER_INITIATED".equalsIgnoreCase(blankToNull(call.getDirection()))
+                        ? SenderType.CUSTOMER
+                        : SenderType.SYSTEM;
+        String senderIdentifier = switch (senderType) {
+            case AGENT -> blankToNull(call.getInitiatedBy()) != null
+                    ? call.getInitiatedBy()
+                    : blankToNull(call.getDisplayPhoneNumber()) != null ? call.getDisplayPhoneNumber() : "Support";
+            case CUSTOMER -> blankToNull(call.getFromPhone()) != null
+                    ? call.getFromPhone()
+                    : blankToNull(call.getPhoneNumber()) != null ? call.getPhoneNumber() : "Customer";
+            default -> "WhatsApp call";
+        };
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("timeline_item_type", "whatsapp_call");
+        metadata.put("wa_call_id", call.getCallId());
+        if (blankToNull(call.getStatus()) != null) {
+            metadata.put("wa_call_status", blankToNull(call.getStatus()));
+        }
+        if (blankToNull(call.getDirection()) != null) {
+            metadata.put("wa_call_direction", blankToNull(call.getDirection()));
+        }
+        if (blankToNull(call.getEvent()) != null) {
+            metadata.put("wa_call_event", blankToNull(call.getEvent()));
+        }
+        if (call.getDurationSeconds() != null) {
+            metadata.put("wa_call_duration_seconds", call.getDurationSeconds());
+        }
+        if (call.getStartTime() != null) {
+            metadata.put("wa_call_started_at", call.getStartTime());
+        }
+        if (call.getEndTime() != null) {
+            metadata.put("wa_call_ended_at", call.getEndTime());
+        }
+        return new MessageDto(
+                "wa-call-" + call.getCallId(),
+                null,
+                null,
+                null,
+                List.of(),
+                ChannelType.WHATSAPP,
+                senderType,
+                senderIdentifier,
+                conversationTimelineBody(call),
+                List.of(),
+                List.of(),
+                null,
+                metadata,
+                timelineOccurredAt(call));
+    }
+
+    private Instant timelineOccurredAt(WhatsAppCall call) {
+        if (call.getStartTime() != null) {
+            return call.getStartTime();
+        }
+        if (call.getInitiatedAt() != null) {
+            return call.getInitiatedAt();
+        }
+        if (call.getPermissionRequestedAt() != null) {
+            return call.getPermissionRequestedAt();
+        }
+        if (call.getCreatedAt() != null) {
+            return call.getCreatedAt();
+        }
+        return call.getUpdatedAt();
+    }
+
+    private String conversationTimelineBody(WhatsAppCall call) {
+        String status = blankToNull(call.getStatus());
+        if ("COMPLETED".equalsIgnoreCase(status)) {
+            if (call.getDurationSeconds() != null && call.getDurationSeconds() > 0) {
+                long minutes = call.getDurationSeconds() / 60;
+                long seconds = call.getDurationSeconds() % 60;
+                if (minutes > 0) {
+                    return "Completed a WhatsApp call (" + minutes + "m " + seconds + "s).";
+                }
+                return "Completed a WhatsApp call (" + seconds + "s).";
+            }
+            return "Completed a WhatsApp call.";
+        }
+        if ("REJECTED".equalsIgnoreCase(status)) {
+            return "Declined a WhatsApp call.";
+        }
+        if ("FAILED".equalsIgnoreCase(status)) {
+            return "WhatsApp call failed.";
+        }
+        if ("TERMINATED".equalsIgnoreCase(status)) {
+            return "Ended a WhatsApp call.";
+        }
+        if ("ACCEPTED".equalsIgnoreCase(status) || "PRE_ACCEPTED".equalsIgnoreCase(status)) {
+            return "Answered a WhatsApp call.";
+        }
+        return "Started a WhatsApp call.";
     }
 
     private Set<String> customerPhones(String customerId) {
