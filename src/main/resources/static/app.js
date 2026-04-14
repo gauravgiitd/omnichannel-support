@@ -926,7 +926,7 @@ function renderAgentWorkspace() {
     }
     const filteredMessages = filteredAgentMessages();
     const filteredDocuments = filteredAgentDocuments();
-    text("timelineCount", `${filteredMessages.length} timeline items in view`);
+    text("timelineCount", `${filteredMessages.filter(shouldDisplayTimelineMessage).length} timeline items in view`);
     text("documentCount", `${filteredDocuments.length} docs`);
     renderChatThread("messageTimeline", filteredMessages, false);
     renderDocumentsFromList("documentList", filteredDocuments, "Documents shared from any channel appear here.");
@@ -1648,7 +1648,8 @@ function renderChatThreadInElement(container, messages, customerView) {
     if (!container) {
         return;
     }
-    if (!messages.length) {
+    const visibleMessages = (messages || []).filter(shouldDisplayTimelineMessage);
+    if (!visibleMessages.length) {
         container.className = `chat-thread ${customerView ? "customer-view" : "agent-view"} empty-state`;
         container.textContent = customerView
             ? "No conversation or call activity yet."
@@ -1658,7 +1659,7 @@ function renderChatThreadInElement(container, messages, customerView) {
 
     container.className = `chat-thread ${customerView ? "customer-view" : "agent-view"}`;
     container.innerHTML = "";
-    messages.forEach((message) => container.appendChild(buildMessageNode(message, customerView)));
+    visibleMessages.forEach((message) => container.appendChild(buildMessageNode(message, customerView)));
 }
 
 function renderCustomerJtbdCard(jtbd) {
@@ -1681,18 +1682,13 @@ function renderCustomerJtbdCard(jtbd) {
 function buildMessageNode(message, customerView) {
     const template = document.getElementById("messageTemplate");
     const node = template.content.firstElementChild.cloneNode(true);
-    const senderClass = message.sender_type === "AGENT"
-        ? "agent"
-        : message.sender_type === "CUSTOMER"
-            ? "customer"
-            : message.sender_type === "EXPERT"
-                ? "expert"
-                : "system";
+    const metadata = message.metadata || {};
+    const senderClass = resolveTimelineSenderClass(message);
     node.classList.add(senderClass);
     const senderMeta = renderSenderMeta(message, customerView);
     const jtbdTags = (message.customer_jtbd_tags || []).map((tag) => badge(`JTBD ${tag}`));
     node.querySelector(".bubble-meta").innerHTML = [
-        badge(channelLabel(message.channel)),
+        badge(metadata.timeline_item_type === "whatsapp_call" ? "WhatsApp calls" : channelLabel(message.channel)),
         badge(senderMeta.badge),
         ...jtbdTags,
         `<span class="small-note">${escapeHtml(senderMeta.detail)}</span>`,
@@ -1714,6 +1710,9 @@ function readableMessageBody(message, customerView) {
         return readableWhatsAppCallBody(message, customerView);
     }
     if (message.channel === "WHATSAPP" && metadata.wa_interactive_type === "call_permission_reply") {
+        if (!metadata.wa_call_permission_request_linked) {
+            return "";
+        }
         const response = `${metadata.wa_call_permission_response || ""}`.toLowerCase();
         if (response === "accept") {
             return "Customer approved WhatsApp calling.";
@@ -1761,6 +1760,33 @@ function readableWhatsAppCallBody(message, customerView) {
         return `${actor} answered a WhatsApp call.`;
     }
     return `${actor} started a WhatsApp call.`;
+}
+
+function resolveTimelineSenderClass(message) {
+    const metadata = message.metadata || {};
+    if (metadata.timeline_item_type === "whatsapp_call") {
+        const direction = `${metadata.wa_call_direction || ""}`.toUpperCase();
+        if (direction === "USER_INITIATED") {
+            return "customer";
+        }
+        if (direction === "BUSINESS_INITIATED") {
+            return "agent";
+        }
+    }
+    return message.sender_type === "AGENT"
+        ? "agent"
+        : message.sender_type === "CUSTOMER"
+            ? "customer"
+            : message.sender_type === "EXPERT"
+                ? "expert"
+                : "system";
+}
+
+function shouldDisplayTimelineMessage(message) {
+    const metadata = message.metadata || {};
+    return !(message.channel === "WHATSAPP"
+        && metadata.wa_interactive_type === "call_permission_reply"
+        && !metadata.wa_call_permission_request_linked);
 }
 
 function formatCallDuration(durationSeconds) {

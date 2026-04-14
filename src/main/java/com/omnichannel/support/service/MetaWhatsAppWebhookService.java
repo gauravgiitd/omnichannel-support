@@ -146,11 +146,14 @@ public class MetaWhatsAppWebhookService {
             return 0;
         }
         Instant expiresAt = parseEpochSeconds(reply.path("expiration_timestamp").asText(null));
+        String replyToMessageId = blankToNull(message.path("context").path("id").asText());
+        boolean linkedToAgentRequest = isLinkedToAgentPermissionRequest(replyToMessageId);
         log.info(
-                "Resolved WhatsApp call permission reply from={} response={} expiresAt={}",
+                "Resolved WhatsApp call permission reply from={} response={} expiresAt={} linkedToAgentRequest={}",
                 normalizePhone(from),
                 normalizedStatus,
-                expiresAt);
+                expiresAt,
+                linkedToAgentRequest);
         whatsAppCallingService.recordPermissionStatus(normalizePhone(from), normalizedStatus, "meta_webhook", expiresAt);
         return 1;
     }
@@ -233,7 +236,7 @@ public class MetaWhatsAppWebhookService {
         String messageId = message.path("id").asText();
         String replyToMessageId = blankToNull(message.path("context").path("id").asText());
         List<String> attachmentUrls = extractAttachments(message);
-        Map<String, Object> messageMetadata = extractMessageMetadata(message);
+        Map<String, Object> messageMetadata = extractMessageMetadata(message, replyToMessageId);
 
         String bodyText = extractBodyText(message);
         if (!hasText(bodyText)) {
@@ -331,7 +334,7 @@ public class MetaWhatsAppWebhookService {
         return "Customer sent a " + type + " message on WhatsApp.";
     }
 
-    private static Map<String, Object> extractMessageMetadata(JsonNode message) {
+    private Map<String, Object> extractMessageMetadata(JsonNode message, String replyToMessageId) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         JsonNode interactive = message.path("interactive");
         if (!interactive.isMissingNode() && !interactive.isNull()) {
@@ -344,9 +347,35 @@ public class MetaWhatsAppWebhookService {
                 }
                 putIfPresent(metadata, "wa_call_permission_response_source", blankToNull(callPermissionReply.path("response_source").asText()));
                 putIfPresent(metadata, "wa_call_permission_expiration_timestamp", blankToNull(callPermissionReply.path("expiration_timestamp").asText()));
+                metadata.put("wa_call_permission_request_linked", isLinkedToAgentPermissionRequest(replyToMessageId));
             }
         }
         return metadata;
+    }
+
+    private boolean isLinkedToAgentPermissionRequest(String replyToMessageId) {
+        if (!hasText(replyToMessageId)) {
+            return false;
+        }
+        return messageRepository.findByExternalThreadRef(replyToMessageId)
+                .map(message -> {
+                    Map<String, Object> metadata = parseObjectMap(message.getMetadataJson());
+                    Object source = metadata.get("source");
+                    return source != null && "agent_whatsapp_call_permission_request".equalsIgnoreCase(source.toString());
+                })
+                .orElse(false);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseObjectMap(String json) {
+        if (!hasText(json)) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, Map.class);
+        } catch (Exception ex) {
+            return Map.of();
+        }
     }
 
     private static String resolveFileName(
