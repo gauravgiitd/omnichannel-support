@@ -60,13 +60,15 @@ public class WhatsAppCallingService {
             Integer durationSeconds,
             String rawPayloadJson) {
         WhatsAppCall call = whatsAppCallRepository.findByCallId(callId).orElseGet(WhatsAppCall::new);
+        String existingDirection = blankToNull(call.getDirection());
+        String incomingDirection = blankToNull(direction);
         call.setCallId(callId);
         call.setFromPhone(normalizePhone(fromPhone));
         call.setToPhone(normalizePhone(toPhone));
         call.setPhoneNumber(resolveCustomerPhone(call.getFromPhone(), call.getToPhone()));
         call.setCustomerId(resolveCustomerId(call.getFromPhone(), call.getToPhone()).orElse(call.getCustomerId()));
         call.setStatus(blankToNull(status));
-        call.setDirection(blankToNull(direction));
+        call.setDirection(resolveDirection(existingDirection, incomingDirection));
         call.setEvent(blankToNull(event));
         if (hasText(sessionSdpType)) {
             call.setSessionSdpType(blankToNull(sessionSdpType));
@@ -91,6 +93,20 @@ public class WhatsAppCallingService {
         }
         call.setRawPayloadJson(rawPayloadJson);
         return whatsAppCallRepository.save(call);
+    }
+
+    private String resolveDirection(String existingDirection, String incomingDirection) {
+        if (incomingDirection == null) {
+            return existingDirection;
+        }
+        if (existingDirection == null) {
+            return incomingDirection;
+        }
+        if ("BUSINESS_INITIATED".equalsIgnoreCase(existingDirection)
+                || "USER_INITIATED".equalsIgnoreCase(existingDirection)) {
+            return existingDirection;
+        }
+        return incomingDirection;
     }
 
     @Transactional
