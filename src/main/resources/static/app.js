@@ -18,6 +18,7 @@ const state = {
     agentWorkspace: null,
     customerRequests: [],
     contactMappings: [],
+    adminWhatsAppForwarding: null,
     jtbdTypes: [],
     jtbdCustomers: [],
     customerJtbdsByCustomer: {},
@@ -392,6 +393,24 @@ function bindForms() {
         text("taskDeliveryDebugResult", JSON.stringify(debug, null, 2));
     });
 
+    bindSubmit("ngrokForwardingForm", async (event) => {
+        const data = new FormData(event.currentTarget);
+        const response = await api("/v1/admin/whatsapp-forwarding", {
+            method: "PUT",
+            body: {
+                ngrok_endpoint_url: blankOrNull(data.get("ngrokEndpointUrl"))
+            }
+        });
+        state.adminWhatsAppForwarding = response.data;
+        renderNgrokForwardingConfig();
+        text(
+            "ngrokForwardingResult",
+            response.data.ngrok_endpoint_url
+                ? "Saved ngrok forwarding endpoint."
+                : "Ngrok forwarding disabled."
+        );
+    });
+
     bindSubmit("jtbdTypeForm", async (event) => {
         const data = new FormData(event.currentTarget);
         const jtbdTypeId = `${data.get("jtbdTypeId") || ""}`.trim();
@@ -480,13 +499,16 @@ async function refreshAdminDashboard() {
     if (state.view !== "admin") {
         return;
     }
-    const [summaryResponse, mappingsResponse] = await Promise.all([
+    const [summaryResponse, mappingsResponse, forwardingResponse] = await Promise.all([
         api("/v1/admin/summary"),
-        api("/v1/admin/contact-mappings")
+        api("/v1/admin/contact-mappings"),
+        api("/v1/admin/whatsapp-forwarding")
     ]);
     state.contactMappings = mappingsResponse.data;
+    state.adminWhatsAppForwarding = forwardingResponse.data;
     renderAdminMetrics(summaryResponse.data);
     renderContactMappings();
+    renderNgrokForwardingConfig();
 }
 
 async function refreshJtbdDashboard() {
@@ -723,6 +745,19 @@ function renderContactMappings() {
     container.querySelectorAll(".mapping-delete").forEach((button) => {
         button.addEventListener("click", () => deleteContactMapping(button.dataset.mappingId).catch(handleError));
     });
+}
+
+function renderNgrokForwardingConfig() {
+    const form = el("ngrokForwardingForm");
+    if (!form) {
+        return;
+    }
+    const input = form.querySelector("[name='ngrokEndpointUrl']");
+    if (!input) {
+        return;
+    }
+    const endpoint = state.adminWhatsAppForwarding?.ngrok_endpoint_url || "";
+    input.value = endpoint;
 }
 
 function renderJtbdTypes() {

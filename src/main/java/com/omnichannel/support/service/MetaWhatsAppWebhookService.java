@@ -30,6 +30,7 @@ public class MetaWhatsAppWebhookService {
     private final MessageRepository messageRepository;
     private final AuditService auditService;
     private final WhatsAppCallingService whatsAppCallingService;
+    private final WhatsAppNgrokForwardingService whatsAppNgrokForwardingService;
 
     public boolean isConfigured() {
         return properties.isEnabled()
@@ -58,6 +59,7 @@ public class MetaWhatsAppWebhookService {
                     if (!message.hasNonNull("id")) {
                         continue;
                     }
+                    whatsAppNgrokForwardingService.forwardInboundMessage(value.path("metadata"), message);
                     String messageId = message.path("id").asText();
                     processedCallEvents += processPermissionReplyMessage(message);
                     if (messageRepository.findByExternalThreadRef(messageId).isPresent()) {

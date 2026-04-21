@@ -1,9 +1,12 @@
 package com.omnichannel.support.api;
 
 import com.omnichannel.support.dto.ApiResponse;
+import com.omnichannel.support.dto.AdminWhatsAppForwardingConfigDto;
 import com.omnichannel.support.dto.CustomerContactMappingDto;
+import com.omnichannel.support.dto.UpdateAdminWhatsAppForwardingConfigRequest;
 import com.omnichannel.support.dto.UpsertCustomerContactMappingRequest;
 import com.omnichannel.support.service.AdminCleanupService;
+import com.omnichannel.support.service.AdminWhatsAppForwardingConfigService;
 import com.omnichannel.support.service.CustomerContactMappingService;
 import com.omnichannel.support.service.TaskOriginReplyService;
 import com.omnichannel.support.service.TaskService;
@@ -30,6 +33,7 @@ public class AdminController {
     private final CustomerContactMappingService customerContactMappingService;
     private final TaskService taskService;
     private final TaskOriginReplyService taskOriginReplyService;
+    private final AdminWhatsAppForwardingConfigService adminWhatsAppForwardingConfigService;
 
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<AdminCleanupService.AdminSummary>> summary() {
@@ -39,6 +43,18 @@ public class AdminController {
     @GetMapping("/contact-mappings")
     public ResponseEntity<ApiResponse<List<CustomerContactMappingDto>>> contactMappings() {
         return ResponseEntity.ok(ApiResponse.success(customerContactMappingService.listAll()));
+    }
+
+    @GetMapping("/whatsapp-forwarding")
+    public ResponseEntity<ApiResponse<AdminWhatsAppForwardingConfigDto>> whatsappForwardingConfig() {
+        return ResponseEntity.ok(ApiResponse.success(adminWhatsAppForwardingConfigService.getConfig()));
+    }
+
+    @PutMapping("/whatsapp-forwarding")
+    public ResponseEntity<ApiResponse<AdminWhatsAppForwardingConfigDto>> updateWhatsAppForwardingConfig(
+            @Valid @RequestBody UpdateAdminWhatsAppForwardingConfigRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                adminWhatsAppForwardingConfigService.update(request.ngrokEndpointUrl())));
     }
 
     @GetMapping("/tasks/{taskId}/delivery-debug")

@@ -96,6 +96,27 @@
             <section class="panel">
                 <div class="panel-head">
                     <div>
+                        <p class="eyebrow">WhatsApp Local Debugging</p>
+                        <h3>Forward inbound messages to ngrok</h3>
+                    </div>
+                </div>
+                <form id="ngrokForwardingForm" class="stack-form">
+                    <label>
+                        Ngrok endpoint URL (optional)
+                        <input name="ngrokEndpointUrl" type="url" placeholder="https://xxxx-xx-xx-xx-xx.ngrok-free.app/webhooks/whatsapp">
+                    </label>
+                    <p class="small-note">
+                        When set, every inbound WhatsApp message is forwarded to this endpoint for local 2-way messaging flows.
+                        Leave empty to disable forwarding.
+                    </p>
+                    <button type="submit">Save ngrok forwarding</button>
+                </form>
+                <div id="ngrokForwardingResult" class="small-note"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
                         <p class="eyebrow">Danger Zone</p>
                         <h3>Delete one customer</h3>
                     </div>
