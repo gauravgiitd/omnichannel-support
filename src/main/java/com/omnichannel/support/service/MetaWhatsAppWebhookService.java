@@ -47,6 +47,7 @@ public class MetaWhatsAppWebhookService {
         int processedMessages = 0;
         int processedCallEvents = 0;
 
+        boolean forwardedRawToNgrok = false;
         for (JsonNode entry : payload.path("entry")) {
             for (JsonNode change : entry.path("changes")) {
                 JsonNode value = change.path("value");
@@ -59,7 +60,10 @@ public class MetaWhatsAppWebhookService {
                     if (!message.hasNonNull("id")) {
                         continue;
                     }
-                    whatsAppNgrokForwardingService.forwardInboundMessage(value.path("metadata"), message);
+                    if (!forwardedRawToNgrok) {
+                        whatsAppNgrokForwardingService.forwardRawPayload(rawPayload);
+                        forwardedRawToNgrok = true;
+                    }
                     String messageId = message.path("id").asText();
                     processedCallEvents += processPermissionReplyMessage(message);
                     if (messageRepository.findByExternalThreadRef(messageId).isPresent()) {
