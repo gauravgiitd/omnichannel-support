@@ -179,7 +179,10 @@ public class GmailApiClient {
         if (lastIo != null) {
             throw lastIo;
         }
-        throw lastRuntime != null ? lastRuntime : new IOException("failed to refresh Gmail access token");
+        if (lastRuntime != null) {
+            throw lastRuntime;
+        }
+        throw new IOException("failed to refresh Gmail access token");
     }
 
     private static boolean isUsable(AccessToken token) {
