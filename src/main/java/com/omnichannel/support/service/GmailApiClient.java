@@ -15,9 +15,9 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -31,9 +31,13 @@ public class GmailApiClient {
 
     private static final String GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
     private static final Logger log = LoggerFactory.getLogger(GmailApiClient.class);
+    private static final Duration ACCESS_TOKEN_SKEW = Duration.ofMinutes(1);
 
     private final GmailPollingProperties properties;
     private final ObjectMapper objectMapper;
+    private final Object accessTokenLock = new Object();
+
+    private volatile AccessToken cachedAccessToken;
 
     public boolean isConfigured() {
         return hasText(properties.getClientId())
@@ -122,14 +126,84 @@ public class GmailApiClient {
     }
 
     private String accessToken() throws IOException {
+        AccessToken current = cachedAccessToken;
+        if (isUsable(current)) {
+            return current.getTokenValue();
+        }
+        synchronized (accessTokenLock) {
+            current = cachedAccessToken;
+            if (isUsable(current)) {
+                return current.getTokenValue();
+            }
+            AccessToken refreshed = refreshAccessTokenWithRetry();
+            cachedAccessToken = refreshed;
+            return refreshed.getTokenValue();
+        }
+    }
+
+    private AccessToken refreshAccessTokenWithRetry() throws IOException {
         GoogleCredentials credentials = UserCredentials.newBuilder()
                 .setClientId(properties.getClientId())
                 .setClientSecret(properties.getClientSecret())
                 .setRefreshToken(properties.getRefreshToken())
                 .build()
                 .createScoped(List.of(GMAIL_SCOPE));
-        AccessToken token = credentials.refreshAccessToken();
-        return token.getTokenValue();
+        int maxAttempts = Math.max(1, properties.getRequestRetries() + 1);
+        IOException lastIo = null;
+        RuntimeException lastRuntime = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            try {
+                return credentials.refreshAccessToken();
+            } catch (IOException ex) {
+                lastIo = ex;
+                if (attempt >= maxAttempts || !isTransientTokenRefreshFailure(ex)) {
+                    throw ex;
+                }
+                log.warn(
+                        "Refreshing Gmail access token failed on attempt {} of {} with a transient error; retrying",
+                        attempt,
+                        maxAttempts,
+                        ex);
+            } catch (RuntimeException ex) {
+                lastRuntime = ex;
+                if (attempt >= maxAttempts || !isTransientTokenRefreshFailure(ex)) {
+                    throw ex;
+                }
+                log.warn(
+                        "Refreshing Gmail access token failed on attempt {} of {} with a transient error; retrying",
+                        attempt,
+                        maxAttempts,
+                        ex);
+            }
+        }
+        if (lastIo != null) {
+            throw lastIo;
+        }
+        throw lastRuntime != null ? lastRuntime : new IOException("failed to refresh Gmail access token");
+    }
+
+    private static boolean isUsable(AccessToken token) {
+        if (token == null || token.getTokenValue() == null || token.getTokenValue().isBlank()) {
+            return false;
+        }
+        Instant expiry = token.getExpirationTime() != null ? token.getExpirationTime().toInstant() : null;
+        return expiry == null || expiry.isAfter(Instant.now().plus(ACCESS_TOKEN_SKEW));
+    }
+
+    private static boolean isTransientTokenRefreshFailure(Throwable error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String normalized = message.toLowerCase();
+        return normalized.contains(" 500 ")
+                || normalized.contains(" 502 ")
+                || normalized.contains(" 503 ")
+                || normalized.contains(" 504 ")
+                || normalized.contains("internal_failure")
+                || normalized.contains("internal error")
+                || normalized.contains("temporar")
+                || normalized.contains("timeout");
     }
 
     private String userId() {
